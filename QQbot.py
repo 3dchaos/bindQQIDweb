@@ -1,4 +1,5 @@
 #pip install PyQt6 websockets
+#pyinstaller -F --win-private-assemblies QQbot.py
 import sys
 import json
 import asyncio
