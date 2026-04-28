@@ -60,10 +60,12 @@ class App:
         self.var_manage = tk.BooleanVar(value=False)
         self.var_checkin = tk.BooleanVar(value=False)
         self.var_patrol = tk.BooleanVar(value=False)
-        
+        self.var_auto_join = tk.BooleanVar(value=False) # 新增：自动进群开关变量
+
         ttk.Checkbutton(grp_f, text="开启群管理 (总开关)", variable=self.var_manage, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="开启群签到 (子开关)", variable=self.var_checkin, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="巡逻群成员 (自动踢黑)", variable=self.var_patrol, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
+        ttk.Checkbutton(grp_f, text="自动识别邀请进群", variable=self.var_auto_join, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
 
         limit_f = ttk.Frame(left_frame)
         limit_f.pack(fill="x", pady=5)
@@ -105,7 +107,8 @@ class App:
                 self.var_manage.set(conf.get('enable_manage', False))
                 self.var_checkin.set(conf.get('enable_checkin', False))
                 self.var_patrol.set(conf.get('enable_patrol', False))
-                
+                self.var_auto_join.set(conf.get('enable_auto_join', False))
+
                 # 加载注册上限
                 limit = conf.get('max_binds', 2)
                 self.spin_limit.delete(0, "end")
@@ -142,6 +145,8 @@ class App:
                 enable_manage=manage,
                 enable_checkin=checkin,
                 enable_patrol=patrol,
+                # 在字典中加入这一行
+                enable_auto_join=self.var_auto_join.get(),
                 max_binds=max_b
             ), ['id'])
         except Exception as e:
@@ -153,6 +158,7 @@ class App:
             self.worker.enable_checkin = checkin
             self.worker.enable_patrol = patrol
             self.worker.max_binds = max_b
+            self.worker.enable_auto_join = self.var_auto_join.get()
             self.log(f"系统: 配置已同步到运行中的 Bot (上限: {max_b})")
 
     def update_bot_flags(self):

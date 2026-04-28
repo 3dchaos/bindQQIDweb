@@ -18,7 +18,7 @@ class BotWorker:
         self.enable_group_manage = False
         self.enable_checkin = False
         self.enable_patrol = False 
-        
+        self.enable_auto_join = False # 自动进群开关
         self.running = False
         self.loop = None
         
@@ -84,7 +84,10 @@ class BotWorker:
             reply = self.get_zones_msg(zones, records)
             await self.send_private_msg(websocket, qq_num, reply)
             return
-
+        # 过滤卡片消息，防止触发“无法识别”回复
+        if "[卡片]" in msg_text or msg_text.startswith('{"app"') or "[CQ:json" in msg_text:
+            self.log_func(f"收到私聊邀请卡片 (来自QQ:{qq_num})，已跳过自动回复。")
+            return
         # 2. 指令：查下名下账号
         if msg_text == "查下名下账号":
             found = []
@@ -200,20 +203,65 @@ class BotWorker:
         cmd_type = ""
         target_qq = ""
 
-        if re.match(r"^/(?:加入黑名单QQ|加黑)\s*(\d+)$", clean_msg):
+        cmd_params = {}
+
+        if re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg):
             cmd_type = "add_black"
-            target_qq = re.match(r"^/(?:加入黑名单QQ|加黑)\s*(\d+)$", clean_msg).group(1)
-        elif re.match(r"^/(?:删除黑名单QQ|删黑)\s*(\d+)$", clean_msg):
+            m = re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg)
+            val = m.group(1).strip() if m.group(1) else ""
+            if not val or not val.isdigit():
+                await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456")
+                return
+            target_qq = val
+        elif re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg):
             cmd_type = "del_black"
-            target_qq = re.match(r"^/(?:删除黑名单QQ|删黑)\s*(\d+)$", clean_msg).group(1)
-        elif re.match(r"^/(?:黑名单QQ|黑名单|黑)$", clean_msg):
+            m = re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg)
+            val = m.group(1).strip() if m.group(1) else ""
+            if not val or not val.isdigit():
+                await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456")
+                return
+            target_qq = val
+        elif clean_msg in ["黑名单QQ", "黑名单", "黑", "/黑名单QQ", "/黑名单", "/黑"]:
             cmd_type = "list_black"
-        elif "/功能" in clean_msg:
+        elif clean_msg in ["功能", "/功能"]:
             cmd_type = "menu"
-        elif clean_msg == "/签到":
+        elif clean_msg in ["签到", "/签到"]:
             cmd_type = "checkin"
-        elif clean_msg == "/积分":
+        elif clean_msg in ["积分", "/积分"]:
             cmd_type = "points"
+        elif re.match(r"^/?新增SDK(?:\s+(.*))?$", clean_msg):
+            cmd_type = "add_sdk"
+            m = re.match(r"^新增SDK(?:\s+(.*))?$", clean_msg)
+            params_str = m.group(1).strip() if m.group(1) else ""
+            parts = params_str.split()
+            
+            if len(parts) != 2:
+                await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增SDK [数量] [价格]\n例如：新增SDK 10 50")
+                return
+
+            try:
+                qty = int(parts[0])
+                price = int(parts[1])
+            except ValueError:
+                await self.send_group_msg(websocket, group_id, "❌ 新增失败：数量和价格必须为整数！")
+                return
+
+            if qty < 1 or qty > 100:
+                await self.send_group_msg(websocket, group_id, "❌ 新增失败：单次新增数量范围为 1-100！")
+                return
+            
+            if price < 0:
+                await self.send_group_msg(websocket, group_id, "❌ 新增失败：价格不能为负数！")
+                return
+
+            cmd_params['qty'] = qty
+            cmd_params['price'] = price
+        elif clean_msg == "查询所有SDK":
+            cmd_type = "list_sdk"
+        elif re.match(r"^购买SDK(?:\s+(\d+))?(?:积分)?$", clean_msg):
+            cmd_type = "buy_sdk"
+        elif clean_msg == "删除所有SDK":
+            cmd_type = "clear_sdk"
 
         if not cmd_type: return
 
@@ -233,19 +281,184 @@ class BotWorker:
             await self.send_group_msg(websocket, group_id, "⚠️ 抱歉，本机器人必须拥有【群主/管理员】权限，才能在此群开启功能哦~")
             return
 
-        # 2. 验证【发送消息的人】是否为管理员
-        is_sender_admin = role in ["owner", "admin"]
-        if cmd_type in ["add_black", "del_black", "list_black"]:
-            if not is_sender_admin:
-                self.log_func(f"🚫 拦截: 成员 {user_id} 并非管理，无权操作黑名单。")
+        # 2. 权限验证
+        is_owner = role == "owner"
+        is_admin = role in ["owner", "admin"]
+
+        if cmd_type in ["add_sdk", "clear_sdk"]:
+            if not is_owner:
+                await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【群主】使用。")
+                return
+        elif cmd_type in ["del_black", "add_black", "list_black"]:
+            if not is_admin:
+                self.log_func(f"🚫 拦截: 成员 {user_id} 并非管理，无权操作此指令。")
                 await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 权限不足！需要您是本群的群主或管理员！")
                 return
 
         # ================ 路由 ================
         if cmd_type == "menu":
-            reply = "1，/签到(获得1积分)\n2，/黑名单QQ(查看黑名单列表)\n3，/加入黑名单QQ XXXX\n4，/删除黑名单QQ XXXX\n5，/积分(查看成员积分)"
+            # 动态读取本群未使用的SDK价格
+            sdks_in_db = list(self.table_sdk.find(group_id=group_id, is_used=0))
+            price_stats = {}
+            for s in sdks_in_db:
+                p = s['price']
+                price_stats[p] = price_stats.get(p, 0) + 1
+            
+            sdk_info = ""
+            if not price_stats:
+                sdk_info = " (暂无可用SDK)"
+            else:
+                prices_str = "/".join([f"{p}积分" for p in sorted(price_stats.keys())])
+                sdk_info = f" ({prices_str})"
+
+            reply = (
+                "【🛠️ 机器人功能菜单】\n"
+                "1，签到 (获得1积分)\n"
+                "2，积分 (查看个人积分)\n"
+                f"3，购买SDK{sdk_info}\n"
+                "--- 管理员指令 ---\n"
+                "4，查询所有SDK (仅限管理)\n"
+                "5，新增SDK 数量 价格 (仅限群主)\n"
+                "6，删除所有SDK (仅限群主)\n"
+                "7，黑名单QQ (查看列表)\n"
+                "8，加黑 QQ (拉黑)\n"
+                "9，删黑 QQ (移出)"
+            )
             await self.send_group_msg(websocket, group_id, reply)
             
+        elif cmd_type == "add_sdk":
+            import random
+            import string
+            
+            qty = cmd_params['qty']
+            price = cmd_params['price']
+            
+            # 检查当前数据库总量
+            current_total = self.table_sdk.count(group_id=group_id)
+            if current_total + qty > 100:
+                available = 100 - current_total
+                await self.send_group_msg(websocket, group_id, 
+                    f"❌ 新增失败：本群 SDK 总容量上限为 100 条。\n"
+                    f"当前已存在：{current_total} 条\n"
+                    f"本次尝试新增：{qty} 条\n"
+                    f"剩余空间：{max(0, available)} 条\n"
+                    f"💡 请先执行【删除所有SDK】后再批量新增。")
+                return
+
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            success_count = 0
+            for _ in range(qty):
+                random_sdk = ''.join(random.choices(string.digits, k=13))
+                try:
+                    self.table_sdk.insert(dict(
+                        group_id=group_id,
+                        sdk=random_sdk,
+                        is_used=0,
+                        price=price,
+                        buyer=None,
+                        create_time=now_str,
+                        buy_time=None
+                    ))
+                    success_count += 1
+                except Exception as e:
+                    self.log_func(f"❌ 数据库写入失败: {e}")
+
+            await self.send_group_msg(websocket, group_id, 
+                f"✅ SDK 生成成功！\n群号：{group_id}\n新增数量：{success_count}\n单价：{price} 积分\n时间：{now_str}")
+
+        elif clean_msg == "查询所有SDK":
+            if not is_admin:
+                await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【管理】使用。")
+                return
+            
+            all_sdks = list(self.table_sdk.find(group_id=group_id))
+            if not all_sdks:
+                await self.send_group_msg(websocket, group_id, "❌ 查询失败：本群数据库中暂无 SDK 记录。")
+                return
+
+            lines = [f"【📋 群 {group_id} SDK 全量列表】", "━━━━━━━━━━━━━━"]
+            for s in all_sdks:
+                status = "🔴 已使用" if s['is_used'] else "🟢 未使用"
+                buyer_info = f" | 购买人: {s['buyer']}" if s['buyer'] else ""
+                lines.append(f"🔑 SDK: {s['sdk']}\n💰 价格: {s['price']} | 状态: {status}{buyer_info}")
+                lines.append("--------------")
+            
+            full_msg = "\n".join(lines)
+            await self.send_private_msg(websocket, user_id, full_msg)
+            await self.send_group_msg(websocket, group_id, f"✅ 已将本群所有 SDK 记录({len(all_sdks)}条)私聊发送给管理。")
+
+        elif re.match(r"^购买SDK(?:\s+(\d+))?$", clean_msg):
+            # 获取本群所有未使用的SDK价格
+            available_sdks = list(self.table_sdk.find(group_id=group_id, is_used=0))
+            if not available_sdks:
+                await self.send_group_msg(websocket, group_id, "❌ 购买失败：当前仓库内暂无可用 SDK。")
+                return
+
+            distinct_prices = sorted(list(set([s['price'] for s in available_sdks])))
+            
+            m = re.match(r"^购买SDK(?:\s+(\d+))?$", clean_msg)
+            input_price_str = m.group(1)
+            
+            target_price = None
+            if input_price_str:
+                target_price = int(input_price_str)
+            else:
+                if len(distinct_prices) == 1:
+                    target_price = distinct_prices[0]
+                else:
+                    prices_list = "/".join([str(p) for p in distinct_prices])
+                    await self.send_group_msg(websocket, group_id, f"💡 请输入具体的购买价格，例如：购买SDK {distinct_prices[0]}\n当前可用价格：{prices_list}")
+                    return
+
+            # 校验该价格是否有库存
+            sdk_record = self.table_sdk.find_one(group_id=group_id, price=target_price, is_used=0)
+            if not sdk_record:
+                await self.send_group_msg(websocket, group_id, f"❌ 购买失败：价格为 {target_price} 的 SDK 已售罄。")
+                return
+            
+            # 校验积分
+            user_record = self.table_group.find_one(group_id=group_id, user_id=user_id)
+            if not user_record or user_record['points'] < target_price:
+                current_pts = user_record['points'] if user_record else 0
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] ❌ 积分不足！购买需 {target_price} 积分，你当前仅有 {current_pts} 积分。")
+                return
+            
+            # 执行购买
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            new_points = user_record['points'] - target_price
+            
+            self.table_group.update(dict(id=user_record['id'], points=new_points), ['id'])
+            self.table_sdk.update(dict(
+                id=sdk_record['id'], 
+                is_used=1, 
+                buyer=user_id, 
+                buy_time=now_str
+            ), ['id'])
+            
+            # 私聊发送SDK给购买者
+            private_msg = (
+                f"🎉 购买成功！\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"🔑 您的 SDK：{sdk_record['sdk']}\n"
+                f"💰 消耗积分：{target_price}\n"
+                f"📅 购买时间：{now_str}\n"
+                f"━━━━━━━━━━━━━━"
+            )
+            await self.send_private_msg(websocket, user_id, private_msg)
+            
+            # 群内提示
+            await self.send_group_msg(websocket, group_id, f"🎉 [CQ:at,qq={user_id}] 购买成功！\n消耗积分：{target_price}\n密钥已通过【私聊】发送，请注意查收。")
+
+        elif cmd_type == "clear_sdk":
+            try:
+                self.table_sdk.delete(group_id=group_id)
+                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 SDK 记录。")
+                self.log_func(f"✅ SDK清空: 群 {group_id}")
+            except Exception as e:
+                await self.send_group_msg(websocket, group_id, f"❌ 清空失败：数据库操作异常。\n错误信息：{str(e)}")
+                self.log_func(f"❌ SDK清空失败: {e}")
+
         elif cmd_type == "checkin":
             if not self.enable_checkin: return
             today = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -292,6 +505,23 @@ class BotWorker:
             await self.send_group_msg(websocket, group_id, f"已将QQ {target_qq} 移出黑名单。")
             self.log_func(f"✅ 移出黑名单: {target_qq}")
 
+
+
+    async def handle_group_request(self, websocket, data):
+        """处理加群请求/邀请"""
+        if not self.enable_auto_join: return 
+
+        if data.get("request_type") == "group" and data.get("sub_type") == "invite":
+            group_id = data.get("group_id")
+            self.log_func(f"🔔 发现群邀请：{group_id}，正在自动加入...")
+            await self.call_api(websocket, "set_group_add_request", {
+                "flag": data.get("flag"),
+                "sub_type": "invite",
+                "approve": True
+            })
+
+
+
     async def start(self):
         self.running = True
         try:
@@ -299,6 +529,7 @@ class BotWorker:
             self.table_group = self.db['QQgroup']
             self.table_blacklist = self.db['Blacklist']
             self.table_bot_admin = self.db['BotGroupAdmin']
+            self.table_sdk = self.db['SDK']
             self.log_func("✅ 数据库加载成功")
         except Exception as e:
             self.log_func(f"❌ 数据库异常: {e}")
@@ -340,6 +571,10 @@ class BotWorker:
                                 asyncio.create_task(self.handle_private_message(websocket, data))
                             elif msg_type == "group":
                                 asyncio.create_task(self.handle_group_message(websocket, data))
+                        
+                        # 找到 post_type 判断区域，添加这个分支
+                        elif data.get("post_type") == "request":
+                            asyncio.create_task(self.handle_group_request(websocket, data))
                     except json.JSONDecodeError: pass
         except Exception as e:
             self.log_func(f"❌ 连接异常或断开: {e}")
