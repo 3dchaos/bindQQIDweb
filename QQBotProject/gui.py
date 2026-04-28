@@ -71,6 +71,7 @@ class App:
         self.spin_limit = tk.Spinbox(limit_f, from_=1, to=100, width=5)
         self.spin_limit.insert(0, "2")
         self.spin_limit.pack(side="left", padx=5)
+        ttk.Button(limit_f, text="更新", width=5, command=self.save_all_settings).pack(side="left")
 
         zone_f = ttk.LabelFrame(left_frame, text="区服列表管理")
         zone_f.pack(fill="both", expand=True)
@@ -99,6 +100,16 @@ class App:
                 self.ent_url.insert(0, conf.get('ws_url', DEFAULT_WS_URL))
                 self.ent_token.insert(0, conf.get('token', ""))
                 self.ent_file_path.insert(0, conf.get('filepath', DEFAULT_BIND_FILE))
+                
+                # 加载开关状态
+                self.var_manage.set(conf.get('enable_manage', False))
+                self.var_checkin.set(conf.get('enable_checkin', False))
+                self.var_patrol.set(conf.get('enable_patrol', False))
+                
+                # 加载注册上限
+                limit = conf.get('max_binds', 2)
+                self.spin_limit.delete(0, "end")
+                self.spin_limit.insert(0, str(limit))
             else:
                 self.ent_url.insert(0, DEFAULT_WS_URL)
                 self.ent_file_path.insert(0, DEFAULT_BIND_FILE)
@@ -106,24 +117,53 @@ class App:
             self.ent_url.insert(0, DEFAULT_WS_URL)
             self.ent_file_path.insert(0, DEFAULT_BIND_FILE)
 
-    def save_config_to_db(self, url, token, filepath):
+    def save_all_settings(self):
+        """将当前界面所有设置保存到数据库，并同步到运行中的 Worker"""
+        url = self.ent_url.get().strip()
+        token = self.ent_token.get().strip()
+        filepath = self.get_current_file()
+        
+        manage = self.var_manage.get()
+        checkin = self.var_checkin.get()
+        patrol = self.var_patrol.get()
+        
+        try:
+            max_b = int(self.spin_limit.get())
+        except:
+            max_b = 2
+
         try:
             temp_db = dataset.connect(DB_URL)
-            temp_db['Config'].upsert(dict(id=1, ws_url=url, token=token, filepath=filepath), ['id'])
+            temp_db['Config'].upsert(dict(
+                id=1, 
+                ws_url=url, 
+                token=token, 
+                filepath=filepath,
+                enable_manage=manage,
+                enable_checkin=checkin,
+                enable_patrol=patrol,
+                max_binds=max_b
+            ), ['id'])
         except Exception as e:
             self.log(f"保存配置异常: {e}")
 
-    def update_bot_flags(self):
+        # 如果 Worker 正在运行，同步更新其参数
         if self.worker:
-            self.worker.enable_group_manage = self.var_manage.get()
-            self.worker.enable_checkin = self.var_checkin.get()
-            self.worker.enable_patrol = self.var_patrol.get()
+            self.worker.enable_group_manage = manage
+            self.worker.enable_checkin = checkin
+            self.worker.enable_patrol = patrol
+            self.worker.max_binds = max_b
+            self.log(f"系统: 配置已同步到运行中的 Bot (上限: {max_b})")
+
+    def update_bot_flags(self):
+        self.save_all_settings()
 
     def browse_file(self):
         filename = filedialog.askopenfilename(title="选择注册目录文本文件", filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if filename:
             self.ent_file_path.delete(0, "end")
             self.ent_file_path.insert(0, filename)
+            self.save_all_settings()
             self.load_data()
 
     def get_current_file(self):
@@ -169,15 +209,18 @@ class App:
     def start_bot(self):
         url = self.ent_url.get().strip()
         token = self.ent_token.get().strip()
-        filepath = self.get_current_file()
         
-        self.save_config_to_db(url, token, filepath)
+        # 启动前保存所有当前设置
+        self.save_all_settings()
 
         final_url = f"{url}?access_token={token}" if token else url
         max_b = int(self.spin_limit.get())
 
         self.worker = BotWorker(final_url, max_b, self.log, self.get_current_file)
-        self.update_bot_flags()
+        # 初始同步开关状态
+        self.worker.enable_group_manage = self.var_manage.get()
+        self.worker.enable_checkin = self.var_checkin.get()
+        self.worker.enable_patrol = self.var_patrol.get()
         
         def run_async():
             self.worker.loop = asyncio.new_event_loop()

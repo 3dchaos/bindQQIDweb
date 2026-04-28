@@ -49,6 +49,27 @@ class BotWorker:
     async def send_group_msg(self, websocket, group_id, text):
         await websocket.send(json.dumps({"action": "send_group_msg", "params": {"group_id": group_id, "message": text}}))
 
+    
+    # --- [辅助方法] 生成通用的开区列表回复文本 ---
+    def get_zones_msg(self, zones, records):
+        counts = {z: 0 for z in zones}
+        for r in records:
+            try:
+                # 记录格式: account:zone|qq|nickname
+                acc_zone = r.split('|')[0]
+                zone = acc_zone.split(':')[1]
+                if zone in counts: counts[zone] += 1
+            except: pass
+        
+        reply = "【🏰 当前开区列表及注册人数】\n"
+        if not zones:
+            reply += "暂无开区信息。"
+        else:
+            for z in zones:
+                reply += f"🔹 {z} ：{counts.get(z, 0)} 人已注册\n"
+        return reply.strip()
+
+    # --- 处理私聊消息 (自动附带列表版) ---
     async def handle_private_message(self, websocket, data):
         sender = data.get("sender", {})
         qq_num = sender.get("user_id")
@@ -58,38 +79,44 @@ class BotWorker:
         filepath = self.get_filepath()
         zones, records = read_file_data(filepath)
 
+        # 1. 指令：开区列表
         if msg_text == "开区列表":
-            counts = {z: 0 for z in zones}
-            for r in records:
-                try:
-                    acc_zone = r.split('|')[0]
-                    zone = acc_zone.split(':')[1]
-                    if zone in counts: counts[zone] += 1
-                except: pass
-            reply = "【目前开区列表及注册人数】\n" + ("\n".join([f"- {z} : {counts[z]}人" for z in zones]) if zones else "暂无开区")
-            await self.send_private_msg(websocket, qq_num, reply.strip())
+            reply = self.get_zones_msg(zones, records)
+            await self.send_private_msg(websocket, qq_num, reply)
             return
 
+        # 2. 指令：查下名下账号
         if msg_text == "查下名下账号":
             found = []
             for r in records:
                 try:
                     parts = r.split('|')
                     if len(parts) >= 2 and parts[1] == str(qq_num):
-                        acc, zone = parts[0].split(':')
+                        acc_zone = parts[0]
+                        acc, zone = acc_zone.split(':')
                         found.append(f"账号：{acc} ({zone})")
                 except: pass
-            reply = "【名下已绑定账号】\n" + ("\n".join(found) if found else "未查询到记录")
+            reply = "【👤 您名下已绑定账号】\n" + ("\n".join(found) if found else "未查询到记录")
             await self.send_private_msg(websocket, qq_num, reply)
             return
 
-        match = re.match(r"^绑定(.+?)[，,]\s*账号[：:](.+)$", msg_text)
-        if match:
-            zone_name, account = match.group(1).strip(), match.group(2).strip()
+        # 3. 绑定指令匹配
+        bind_match = re.search(r"绑定\s*(\S+)\s*(?:账号[:：]?)?\s*(\S+)", msg_text)
+        
+        if bind_match:
+            zone_name = re.sub(r"[,，:：\-\s]", "", bind_match.group(1).strip())
+            account = re.sub(r"[,，:：\-\s]", "", bind_match.group(2).strip())
+            
+            # 获取公共列表，准备在失败时使用
+            zones_list_txt = self.get_zones_msg(zones, records)
+
+            # 校验区服是否存在
             if zone_name not in zones:
-                await self.send_private_msg(websocket, qq_num, f"错误：【{zone_name}】不存在")
+                fail_msg = f"❌ 注册失败：【{zone_name}】不在开区名单内！\n\n{zones_list_txt}"
+                await self.send_private_msg(websocket, qq_num, fail_msg)
                 return
 
+            # 校验是否已被注册
             my_binds = 0
             account_registered = False
             for r in records:
@@ -100,18 +127,33 @@ class BotWorker:
                 except: continue
 
             if account_registered:
-                await self.send_private_msg(websocket, qq_num, f"失败：账号【{account}】已在【{zone_name}】注册")
-                return
-            if my_binds >= self.max_binds:
-                await self.send_private_msg(websocket, qq_num, f"失败：注册已达上限({self.max_binds}次)")
+                fail_msg = f"❌ 注册失败：账号【{account}】在【{zone_name}】已被占用！\n\n{zones_list_txt}"
+                await self.send_private_msg(websocket, qq_num, fail_msg)
                 return
 
+            # 校验次数上限
+            if my_binds >= self.max_binds:
+                fail_msg = f"❌ 注册失败：您在此区的名额已满({self.max_binds}个)！\n\n{zones_list_txt}"
+                await self.send_private_msg(websocket, qq_num, fail_msg)
+                return
+
+            # 最终写入
             new_record = f"{account}:{zone_name}|{qq_num}|{nickname}"
             records.append(new_record)
             if write_file_data(filepath, zones, records):
-                await self.send_private_msg(websocket, qq_num, f"成功绑定！\n账号：{account}\n区服：{zone_name}\nQQ：{qq_num}")
+                success_msg = f"🎉 绑定成功！\n区服：{zone_name}\n账号：{account}\n祝您游戏愉快！"
+                await self.send_private_msg(websocket, qq_num, success_msg)
                 self.log_func(f"✅ 私聊绑定成功: {new_record}")
             return
+
+        # 4. 兜底回复
+        default_reply = (
+            "🤖 无法识别指令。请尝试：\n"
+            "1. 绑定 1区 123 (推荐)\n"
+            "2. 开区列表\n"
+            "3. 查下名下账号"
+        )
+        await self.send_private_msg(websocket, qq_num, default_reply)
 
     async def handle_group_increase(self, websocket, data):
         if not self.enable_patrol: return
