@@ -61,11 +61,20 @@ class App:
         self.var_checkin = tk.BooleanVar(value=False)
         self.var_patrol = tk.BooleanVar(value=False)
         self.var_auto_join = tk.BooleanVar(value=False) # 新增：自动进群开关变量
+        self.var_decoder = tk.BooleanVar(value=False) # 新增：解码器开关变量
 
         ttk.Checkbutton(grp_f, text="开启群管理 (总开关)", variable=self.var_manage, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="开启群签到 (子开关)", variable=self.var_checkin, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="巡逻群成员 (自动踢黑)", variable=self.var_patrol, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="自动识别邀请进群", variable=self.var_auto_join, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
+        
+        decoder_f = ttk.Frame(grp_f)
+        decoder_f.pack(fill="x", padx=10, pady=2)
+        ttk.Checkbutton(decoder_f, text="开启解码器功能", variable=self.var_decoder, command=self.update_bot_flags).pack(side="left")
+        ttk.Label(decoder_f, text=" 监听群:").pack(side="left")
+        self.ent_decoder_group = ttk.Entry(decoder_f, width=12)
+        self.ent_decoder_group.pack(side="left", padx=5)
+        ttk.Button(decoder_f, text="更新", width=5, command=self.save_all_settings).pack(side="left")
 
         limit_f = ttk.Frame(left_frame)
         limit_f.pack(fill="x", pady=5)
@@ -108,6 +117,9 @@ class App:
                 self.var_checkin.set(conf.get('enable_checkin', False))
                 self.var_patrol.set(conf.get('enable_patrol', False))
                 self.var_auto_join.set(conf.get('enable_auto_join', False))
+                self.var_decoder.set(conf.get('enable_decoder', False))
+                self.ent_decoder_group.delete(0, "end")
+                self.ent_decoder_group.insert(0, str(conf.get('decoder_group', "")))
 
                 # 加载注册上限
                 limit = conf.get('max_binds', 2)
@@ -145,8 +157,9 @@ class App:
                 enable_manage=manage,
                 enable_checkin=checkin,
                 enable_patrol=patrol,
-                # 在字典中加入这一行
                 enable_auto_join=self.var_auto_join.get(),
+                enable_decoder=self.var_decoder.get(),
+                decoder_group=self.ent_decoder_group.get().strip(),
                 max_binds=max_b
             ), ['id'])
         except Exception as e:
@@ -159,6 +172,8 @@ class App:
             self.worker.enable_patrol = patrol
             self.worker.max_binds = max_b
             self.worker.enable_auto_join = self.var_auto_join.get()
+            self.worker.enable_decoder = self.var_decoder.get()
+            self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
             self.log(f"系统: 配置已同步到运行中的 Bot (上限: {max_b})")
 
     def update_bot_flags(self):
@@ -227,6 +242,9 @@ class App:
         self.worker.enable_group_manage = self.var_manage.get()
         self.worker.enable_checkin = self.var_checkin.get()
         self.worker.enable_patrol = self.var_patrol.get()
+        self.worker.enable_auto_join = self.var_auto_join.get()
+        self.worker.enable_decoder = self.var_decoder.get()
+        self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
         
         def run_async():
             self.worker.loop = asyncio.new_event_loop()

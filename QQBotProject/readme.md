@@ -6,5 +6,8 @@ QQBotProject/
 ├── gui.py            # 🖥️ 界面模块：只负责 Tkinter 界面展示和按钮事件
 └── main.py           # 🚀 入口模块：程序的启动点
 
-pip install websockets dataset
+
+触发此：授权凭证
+
+pip install websockets dataset pycryptodome
 pyinstaller -F -w main.py -n "老登群服管理中心"

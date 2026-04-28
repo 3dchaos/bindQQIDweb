@@ -4,6 +4,10 @@ import websockets
 import re
 import dataset
 import datetime
+import sys
+import os
+import binascii
+from Crypto.Cipher import DES
 from data_manager import read_file_data, write_file_data
 from config import DB_URL
 
@@ -19,6 +23,8 @@ class BotWorker:
         self.enable_checkin = False
         self.enable_patrol = False 
         self.enable_auto_join = False # 自动进群开关
+        self.enable_decoder = False # 新增：解码器开关
+        self.enable_decoder_group = "" # 新增：指定监听解码的群号
         self.running = False
         self.loop = None
         
@@ -68,6 +74,34 @@ class BotWorker:
             for z in zones:
                 reply += f"🔹 {z} ：{counts.get(z, 0)} 人已注册\n"
         return reply.strip()
+
+    def load_decoder_config(self):
+        """加载解码器配置"""
+        if getattr(sys, 'frozen', False):
+            base_path = os.path.dirname(sys.executable)
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        config_file = os.path.join(base_path, "auth_config.json")
+        try:
+            if os.path.exists(config_file):
+                with open(config_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception as e:
+            self.log_func(f"❌ 读取解码器配置失败: {e}")
+        return {"versions": {}}
+
+    def generate_auth_code(self, machine_code, des_key):
+        """生成授权码"""
+        try:
+            clean_code = machine_code.upper()
+            cipher = DES.new(des_key.encode('utf-8'), DES.MODE_ECB)
+            data = clean_code.ljust(16)[:16].encode('utf-8')
+            encrypted = cipher.encrypt(data)
+            return binascii.hexlify(encrypted).decode().upper()
+        except Exception as e:
+            self.log_func(f"❌ 生成授权码失败: {e}")
+            return None
 
     # --- 处理私聊消息 (自动附带列表版) ---
     async def handle_private_message(self, websocket, data):
@@ -152,9 +186,9 @@ class BotWorker:
         # 4. 兜底回复
         default_reply = (
             "🤖 无法识别指令。请尝试：\n"
-            "1. 绑定 1区 123 (推荐)\n"
-            "2. 开区列表\n"
-            "3. 查下名下账号"
+            "绑定 区号 游戏账号 (例如:绑定 热血传奇二区 qwe123asd)\n"
+            "开区列表\n"
+            "查下名下账号"
         )
         await self.send_private_msg(websocket, qq_num, default_reply)
 
@@ -188,7 +222,7 @@ class BotWorker:
                 self.log_func(f"❌ 巡逻踢黑失败: 机器人在群 {group_id} 没有管理员权限。")
 
     async def handle_group_message(self, websocket, data):
-        if not self.enable_group_manage: return
+        if not self.enable_group_manage and not self.enable_decoder: return
 
         group_id = data.get("group_id")
         sender = data.get("sender", {})
@@ -202,68 +236,79 @@ class BotWorker:
 
         cmd_type = ""
         target_qq = ""
-
         cmd_params = {}
 
-        if re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg):
-            cmd_type = "add_black"
-            m = re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg)
-            val = m.group(1).strip() if m.group(1) else ""
-            if not val or not val.isdigit():
-                await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456")
-                return
-            target_qq = val
-        elif re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg):
-            cmd_type = "del_black"
-            m = re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg)
-            val = m.group(1).strip() if m.group(1) else ""
-            if not val or not val.isdigit():
-                await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456")
-                return
-            target_qq = val
-        elif clean_msg in ["黑名单QQ", "黑名单", "黑", "/黑名单QQ", "/黑名单", "/黑"]:
-            cmd_type = "list_black"
-        elif clean_msg in ["功能", "/功能"]:
-            cmd_type = "menu"
-        elif clean_msg in ["签到", "/签到"]:
-            cmd_type = "checkin"
-        elif clean_msg in ["积分", "/积分"]:
-            cmd_type = "points"
-        elif re.match(r"^/?新增SDK(?:\s+(.*))?$", clean_msg):
-            cmd_type = "add_sdk"
-            m = re.match(r"^新增SDK(?:\s+(.*))?$", clean_msg)
-            params_str = m.group(1).strip() if m.group(1) else ""
-            parts = params_str.split()
-            
-            if len(parts) != 2:
-                await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增SDK [数量] [价格]\n例如：新增SDK 10 50")
-                return
+        # 仅在开启群管理时处理管理指令
+        if self.enable_group_manage:
+            if re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg):
+                cmd_type = "add_black"
+                m = re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg)
+                val = m.group(1).strip() if m.group(1) else ""
+                if not val or not val.isdigit():
+                    await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456")
+                    return
+                target_qq = val
+            elif re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg):
+                cmd_type = "del_black"
+                m = re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg)
+                val = m.group(1).strip() if m.group(1) else ""
+                if not val or not val.isdigit():
+                    await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456")
+                    return
+                target_qq = val
+            elif clean_msg in ["黑名单QQ", "黑名单", "黑", "/黑名单QQ", "/黑名单", "/黑"]:
+                cmd_type = "list_black"
+            elif clean_msg in ["功能", "/功能"]:
+                cmd_type = "menu"
+            elif clean_msg in ["签到", "/签到"]:
+                cmd_type = "checkin"
+            elif clean_msg in ["积分", "/积分"]:
+                cmd_type = "points"
+            elif re.match(r"^/?新增SDK(?:\s+(.*))?$", clean_msg):
+                cmd_type = "add_sdk"
+                m = re.match(r"^新增SDK(?:\s+(.*))?$", clean_msg)
+                params_str = m.group(1).strip() if m.group(1) else ""
+                parts = params_str.split()
+                
+                if len(parts) != 2:
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增SDK [数量] [价格]\n例如：新增SDK 10 50")
+                    return
 
-            try:
-                qty = int(parts[0])
-                price = int(parts[1])
-            except ValueError:
-                await self.send_group_msg(websocket, group_id, "❌ 新增失败：数量和价格必须为整数！")
-                return
+                try:
+                    qty = int(parts[0])
+                    price = int(parts[1])
+                except ValueError:
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：数量和价格必须为整数！")
+                    return
 
-            if qty < 1 or qty > 100:
-                await self.send_group_msg(websocket, group_id, "❌ 新增失败：单次新增数量范围为 1-100！")
-                return
-            
-            if price < 0:
-                await self.send_group_msg(websocket, group_id, "❌ 新增失败：价格不能为负数！")
-                return
+                if qty < 1 or qty > 100:
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：单次新增数量范围为 1-100！")
+                    return
+                
+                if price < 0:
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：价格不能为负数！")
+                    return
 
-            cmd_params['qty'] = qty
-            cmd_params['price'] = price
-        elif clean_msg == "查询所有SDK":
-            cmd_type = "list_sdk"
-        elif re.match(r"^购买SDK(?:\s+(\d+))?(?:积分)?$", clean_msg):
-            cmd_type = "buy_sdk"
-        elif clean_msg == "删除所有SDK":
-            cmd_type = "clear_sdk"
+                cmd_params = {}
+                cmd_params['qty'] = qty
+                cmd_params['price'] = price
+            elif clean_msg == "查询所有SDK":
+                cmd_type = "list_sdk"
+            elif re.match(r"^购买SDK(?:\s+(\d+))?(?:积分)?$", clean_msg):
+                cmd_type = "buy_sdk"
+            elif clean_msg == "删除所有SDK":
+                cmd_type = "clear_sdk"
 
-        if not cmd_type: return
+        # 判断是否为解码器相关消息 (增加群号过滤)
+        is_decoder_msg = False
+        if self.enable_decoder:
+            # 如果设置了监听群号，则只在该群响应
+            target_group = str(self.enable_decoder_group).strip()
+            if not target_group or str(group_id) == target_group:
+                if "授权凭证" in clean_msg or re.search(r"(?:机器识别码|机器码)", clean_msg, re.I):
+                    is_decoder_msg = True
+
+        if not cmd_type and not is_decoder_msg: return
 
         # 1. 验证【机器人本身】是否为管理员
         is_bot_admin = False
@@ -278,8 +323,66 @@ class BotWorker:
                 self.table_bot_admin.upsert(dict(group_id=group_id, is_admin=is_bot_admin), ["group_id"])
             
         if not is_bot_admin:
+            # 只有是明确的指令或触发词时才提示，避免干扰日常聊天
             await self.send_group_msg(websocket, group_id, "⚠️ 抱歉，本机器人必须拥有【群主/管理员】权限，才能在此群开启功能哦~")
             return
+
+        # --- [新增] 解码器功能处理 ---
+        if is_decoder_msg:
+            # 1. 指令触发说明
+            if "授权凭证" in clean_msg:
+                config = self.load_decoder_config()
+                versions = config.get("versions", {})
+                if not versions:
+                    await self.send_group_msg(websocket, group_id, "⚠️ 解码器已开启，但未找到有效的版本配置(auth_config.json)。")
+                else:
+                    v_list_str = "、".join(versions.keys())
+                    reply = (
+                        f"【🤖 授权解码服务已启动】\n"
+                        f"当前支持版本：{v_list_str}\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"请按以下格式发送（兼容空格）：\n"
+                        f"机器识别码：XXXXXXXX 解码版本：XXX\n"
+                        f"例如：机器识别码：123456ABCDEF 黑不溜秋"
+                    )
+                    await self.send_group_msg(websocket, group_id, reply)
+                return
+
+            # 2. 匹配解码请求 (机器识别码/机器码)
+            decoder_match = re.search(r"(?:机器识别码|机器码)[:：\s]*([a-zA-Z0-9]+)", clean_msg, re.I)
+            if decoder_match:
+                machine_code = decoder_match.group(1)
+                config = self.load_decoder_config()
+                versions = config.get("versions", {})
+                
+                matched_version = None
+                matched_key = None
+                for v_name, v_key in versions.items():
+                    if v_name in clean_msg:
+                        matched_version = v_name
+                        matched_key = v_key
+                        break
+                
+                if matched_version and matched_key:
+                    auth_code = self.generate_auth_code(machine_code, matched_key)
+                    if auth_code:
+                        # 私聊发送
+                        result_msg = (
+                            f"✅ 授权码生成成功！\n"
+                            f"━━━━━━━━━━━━━━\n"
+                            f"👉 使用版本：{matched_version}\n"
+                            f"👉 客户机器码：{machine_code.upper()}\n"
+                            f"🔑 解锁授权码：{auth_code}\n"
+                            f"━━━━━━━━━━━━━━"
+                        )
+                        await self.send_private_msg(websocket, user_id, result_msg)
+                        # 群内反馈
+                        await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 授权码已通过【私聊】发送，请注意查收。")
+                        self.log_func(f"✅ 解码成功: {user_id} | 版本: {matched_version}")
+                    return
+        # --- [解码器结束] ---
+
+        if not cmd_type: return
 
         # 2. 权限验证
         is_owner = role == "owner"
@@ -313,16 +416,16 @@ class BotWorker:
 
             reply = (
                 "【🛠️ 机器人功能菜单】\n"
-                "1，签到 (获得1积分)\n"
-                "2，积分 (查看个人积分)\n"
-                f"3，购买SDK{sdk_info}\n"
+                "签到 (获得1积分)\n"
+                "积分 (查看个人积分)\n"
+                f"购买SDK{sdk_info}\n"
                 "--- 管理员指令 ---\n"
-                "4，查询所有SDK (仅限管理)\n"
-                "5，新增SDK 数量 价格 (仅限群主)\n"
-                "6，删除所有SDK (仅限群主)\n"
-                "7，黑名单QQ (查看列表)\n"
-                "8，加黑 QQ (拉黑)\n"
-                "9，删黑 QQ (移出)"
+                "查询所有SDK (仅限管理)\n"
+                "新增SDK 数量 价格 (仅限群主)\n"
+                "删除所有SDK (仅限群主)\n"
+                "黑名单QQ (查看列表)\n"
+                "加黑 QQ (拉黑)\n"
+                "删黑 QQ (移出)"
             )
             await self.send_group_msg(websocket, group_id, reply)
             
