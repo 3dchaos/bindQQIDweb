@@ -116,7 +116,7 @@ class BotWorker:
         zones, records = read_file_data(filepath)
 
         # 1. 指令：开区列表
-        if msg_text == "开区列表":
+        if re.fullmatch(r"开区列表", msg_text, re.I):
             reply = self.get_zones_msg(zones, records)
             await self.send_private_msg(websocket, qq_num, reply)
             return
@@ -125,7 +125,7 @@ class BotWorker:
             self.log_func(f"收到私聊邀请卡片 (来自QQ:{qq_num})，已跳过自动回复。")
             return
         # 2. 指令：查下名下账号
-        if msg_text == "查下名下账号":
+        if re.fullmatch(r"(?:查下名下账号|查账号|我的账号)", msg_text, re.I):
             found = []
             for r in records:
                 try:
@@ -140,7 +140,7 @@ class BotWorker:
             return
 
         # 3. 绑定指令匹配
-        bind_match = re.search(r"绑定\s*(\S+)\s*(?:账号[:：]?)?\s*(\S+)", msg_text)
+        bind_match = re.search(r"绑定\s*(\S+)\s*(?:账号[:：]?)?\s*(\S+)", msg_text, re.I)
         
         if bind_match:
             zone_name = re.sub(r"[,，:：\-\s]", "", bind_match.group(1).strip())
@@ -246,42 +246,41 @@ class BotWorker:
         # 仅在开启群管理时处理管理指令
         if self.enable_group_manage:
             # --- 权限管理类 ---
-            if re.match(r"^/?(?:加入黑名单QQ|加黑|拉黑|封禁)(?:\s+(.*))?$", clean_msg, re.I):
+            m_add_black = re.match(r"^/?(?:加入黑名单QQ|加黑|拉黑|封禁)\s*(?:qq)?\s*(.*)$", clean_msg, re.I)
+            m_del_black = re.match(r"^/?(?:删除黑名单QQ|删黑|解黑|取消封禁)\s*(?:qq)?\s*(.*)$", clean_msg, re.I)
+            
+            if m_add_black:
                 cmd_type = "add_black"
-                m = re.match(r"^/?(?:加入黑名单QQ|加黑|拉黑|封禁)(?:\s+(.*))?$", clean_msg, re.I)
-                val = m.group(1).strip() if m.group(1) else ""
-                if not val or not val.isdigit():
+                val = m_add_black.group(1).strip()
+                qq_match = re.search(r"(\d+)", val)
+                if not qq_match:
                     await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456")
                     return
-                target_qq = val
-            elif re.match(r"^/?(?:删除黑名单QQ|删黑|解黑|取消封禁)(?:\s+(.*))?$", clean_msg, re.I):
+                target_qq = qq_match.group(1)
+            elif m_del_black:
                 cmd_type = "del_black"
-                m = re.match(r"^/?(?:删除黑名单QQ|删黑|解黑|取消封禁)(?:\s+(.*))?$", clean_msg, re.I)
-                val = m.group(1).strip() if m.group(1) else ""
-                if not val or not val.isdigit():
+                val = m_del_black.group(1).strip()
+                qq_match = re.search(r"(\d+)", val)
+                if not qq_match:
                     await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456")
                     return
-                target_qq = val
-            elif any(x in clean_msg for x in ["黑名单QQ", "黑名单列表", "查看黑名单"]):
+                target_qq = qq_match.group(1)
+            elif any(re.search(x, clean_msg, re.I) for x in ["黑名单QQ", "黑名单列表", "查看黑名单"]):
                 cmd_type = "list_black"
             
             # --- 用户功能类 ---
-            elif any(x == clean_msg for x in ["功能", "菜单", "指令", "帮助", "help", "功能菜单", "/功能"]):
+            elif any(re.fullmatch(x, clean_msg, re.I) for x in ["功能", "菜单", "指令", "帮助", "help", "功能菜单", "/功能"]):
                 cmd_type = "menu"
-            elif any(x in clean_msg for x in ["签到", "打卡", "每日签到", "我要签到"]):
+            elif any(re.search(x, clean_msg, re.I) for x in ["签到", "打卡", "每日签到", "我要签到"]):
                 cmd_type = "checkin"
-            elif any(x in clean_msg for x in ["积分", "积分点", "我的积分", "查询积分", "查积分", "余额"]):
+            elif any(re.search(x, clean_msg, re.I) for x in ["积分", "积分点", "我的积分", "查询积分", "查积分", "余额"]):
                 cmd_type = "points"
-            elif clean_msg == "开区列表":
-                cmd_type = "list_zones"
-            elif clean_msg == "查下名下账号":
-                cmd_type = "list_my_accounts"
             
             # --- SDK 管理类 ---
-            elif re.match(r"^/?(?:新增SDK|添加SDK)(?:\s+(.*))?$", clean_msg, re.I):
+            elif re.match(r"^/?(?:新增SDK|添加SDK)\s*(.*)$", clean_msg, re.I):
                 cmd_type = "add_sdk"
-                m = re.match(r"^/?(?:新增SDK|添加SDK)(?:\s+(.*))?$", clean_msg, re.I)
-                params_str = m.group(1).strip() if m.group(1) else ""
+                m = re.match(r"^/?(?:新增SDK|添加SDK)\s*(.*)$", clean_msg, re.I)
+                params_str = m.group(1).strip()
                 parts = params_str.split()
                 
                 if len(parts) != 2:
@@ -305,14 +304,27 @@ class BotWorker:
 
                 cmd_params['qty'] = qty
                 cmd_params['price'] = price
-            elif "查询所有SDK" in clean_msg or "列出所有SDK" in clean_msg:
+            elif any(re.search(x, clean_msg, re.I) for x in ["查询所有SDK", "列出所有SDK"]):
                 cmd_type = "list_sdk"
-            elif re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)(?:\s+(\d+))?.*$", clean_msg, re.I):
+            elif re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)\s*(\d+)?.*$", clean_msg, re.I):
                 cmd_type = "buy_sdk"
-                m = re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)(?:\s+(\d+))?.*$", clean_msg, re.I)
+                m = re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)\s*(\d+)?.*$", clean_msg, re.I)
                 cmd_params['price_input'] = m.group(1)
-            elif "删除所有SDK" in clean_msg or "清空SDK" in clean_msg:
+            elif any(re.search(x, clean_msg, re.I) for x in ["删除所有SDK", "清空SDK"]):
                 cmd_type = "clear_sdk"
+
+        # --- [独立匹配] 注册与查询类指令 (自然语言兼容) ---
+        if self.enable_group_bind:
+            # 1. 开区列表兼容
+            if any(re.search(x, clean_msg, re.I) for x in ["开区列表", "有哪些区", "查看开区", "区服列表", "开什么区", "查询开区"]):
+                cmd_type = "list_zones"
+            # 2. 名下账号兼容
+            elif any(re.search(x, clean_msg, re.I) for x in ["查下名下账号", "我的账号", "查账号", "名下账号", "我的绑定", "账号查询"]):
+                cmd_type = "list_my_accounts"
+            # 3. 绑定指令兼容 (保持 re.search 以捕获参数)
+            elif re.search(r"(?:绑定|注册|账号绑定|我要绑定|帮我注册)\s*(\S+)\s*(?:账号[:：]?)?\s*(\S+)", clean_msg, re.I):
+                # 这里仅标记类型，具体捕获在路由处再次执行以保持代码整洁
+                cmd_type = "group_bind"
 
         # 判断是否为解码器相关消息 (增加群号过滤)
         is_decoder_msg = False
