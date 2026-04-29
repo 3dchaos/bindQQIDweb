@@ -25,6 +25,8 @@ class BotWorker:
         self.enable_auto_join = False # 自动进群开关
         self.enable_decoder = False # 新增：解码器开关
         self.enable_decoder_group = "" # 新增：指定监听解码的群号
+        self.enable_group_bind = False # 新增：群绑定开关
+        self.enable_bind_group = "" # 新增：指定监听绑定的群号
         self.running = False
         self.loop = None
         
@@ -222,7 +224,7 @@ class BotWorker:
                 self.log_func(f"❌ 巡逻踢黑失败: 机器人在群 {group_id} 没有管理员权限。")
 
     async def handle_group_message(self, websocket, data):
-        if not self.enable_group_manage and not self.enable_decoder: return
+        if not self.enable_group_manage and not self.enable_decoder and not self.enable_group_bind: return
 
         group_id = data.get("group_id")
         sender = data.get("sender", {})
@@ -232,7 +234,10 @@ class BotWorker:
         raw_msg = data.get("raw_message", "").strip()
         self_id = data.get("self_id")
 
-        clean_msg = re.sub(rf"\[CQ:at,qq={self_id}(,name=[^\]]+)?\]\s*", "", raw_msg).strip()
+        # 1. 预处理消息：移除艾特、前后空格、并转小写用于匹配
+        clean_msg = re.sub(rf"\[CQ:at,qq={self_id}(,name=[^\]]+)?\]", "", raw_msg).strip()
+        # 再次移除可能残留的艾特文本形式（适配某些客户端渲染）
+        clean_msg = re.sub(r"@\S+\s*", "", clean_msg).strip()
 
         cmd_type = ""
         target_qq = ""
@@ -240,33 +245,42 @@ class BotWorker:
 
         # 仅在开启群管理时处理管理指令
         if self.enable_group_manage:
-            if re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg):
+            # --- 权限管理类 ---
+            if re.match(r"^/?(?:加入黑名单QQ|加黑|拉黑|封禁)(?:\s+(.*))?$", clean_msg, re.I):
                 cmd_type = "add_black"
-                m = re.match(r"^/?(?:加入黑名单QQ|加黑)(?:\s+(.*))?$", clean_msg)
+                m = re.match(r"^/?(?:加入黑名单QQ|加黑|拉黑|封禁)(?:\s+(.*))?$", clean_msg, re.I)
                 val = m.group(1).strip() if m.group(1) else ""
                 if not val or not val.isdigit():
                     await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456")
                     return
                 target_qq = val
-            elif re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg):
+            elif re.match(r"^/?(?:删除黑名单QQ|删黑|解黑|取消封禁)(?:\s+(.*))?$", clean_msg, re.I):
                 cmd_type = "del_black"
-                m = re.match(r"^/?(?:删除黑名单QQ|删黑)(?:\s+(.*))?$", clean_msg)
+                m = re.match(r"^/?(?:删除黑名单QQ|删黑|解黑|取消封禁)(?:\s+(.*))?$", clean_msg, re.I)
                 val = m.group(1).strip() if m.group(1) else ""
                 if not val or not val.isdigit():
                     await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456")
                     return
                 target_qq = val
-            elif clean_msg in ["黑名单QQ", "黑名单", "黑", "/黑名单QQ", "/黑名单", "/黑"]:
+            elif any(x in clean_msg for x in ["黑名单QQ", "黑名单列表", "查看黑名单"]):
                 cmd_type = "list_black"
-            elif clean_msg in ["功能", "/功能"]:
+            
+            # --- 用户功能类 ---
+            elif any(x == clean_msg for x in ["功能", "菜单", "指令", "帮助", "help", "功能菜单", "/功能"]):
                 cmd_type = "menu"
-            elif clean_msg in ["签到", "/签到"]:
+            elif any(x in clean_msg for x in ["签到", "打卡", "每日签到", "我要签到"]):
                 cmd_type = "checkin"
-            elif clean_msg in ["积分", "/积分"]:
+            elif any(x in clean_msg for x in ["积分", "积分点", "我的积分", "查询积分", "查积分", "余额"]):
                 cmd_type = "points"
-            elif re.match(r"^/?新增SDK(?:\s+(.*))?$", clean_msg):
+            elif clean_msg == "开区列表":
+                cmd_type = "list_zones"
+            elif clean_msg == "查下名下账号":
+                cmd_type = "list_my_accounts"
+            
+            # --- SDK 管理类 ---
+            elif re.match(r"^/?(?:新增SDK|添加SDK)(?:\s+(.*))?$", clean_msg, re.I):
                 cmd_type = "add_sdk"
-                m = re.match(r"^新增SDK(?:\s+(.*))?$", clean_msg)
+                m = re.match(r"^/?(?:新增SDK|添加SDK)(?:\s+(.*))?$", clean_msg, re.I)
                 params_str = m.group(1).strip() if m.group(1) else ""
                 parts = params_str.split()
                 
@@ -289,14 +303,15 @@ class BotWorker:
                     await self.send_group_msg(websocket, group_id, "❌ 新增失败：价格不能为负数！")
                     return
 
-                cmd_params = {}
                 cmd_params['qty'] = qty
                 cmd_params['price'] = price
-            elif clean_msg == "查询所有SDK":
+            elif "查询所有SDK" in clean_msg or "列出所有SDK" in clean_msg:
                 cmd_type = "list_sdk"
-            elif re.match(r"^购买SDK(?:\s+(\d+))?(?:积分)?$", clean_msg):
+            elif re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)(?:\s+(\d+))?.*$", clean_msg, re.I):
                 cmd_type = "buy_sdk"
-            elif clean_msg == "删除所有SDK":
+                m = re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)(?:\s+(\d+))?.*$", clean_msg, re.I)
+                cmd_params['price_input'] = m.group(1)
+            elif "删除所有SDK" in clean_msg or "清空SDK" in clean_msg:
                 cmd_type = "clear_sdk"
 
         # 判断是否为解码器相关消息 (增加群号过滤)
@@ -305,7 +320,10 @@ class BotWorker:
             # 如果设置了监听群号，则只在该群响应
             target_group = str(self.enable_decoder_group).strip()
             if not target_group or str(group_id) == target_group:
-                if "授权凭证" in clean_msg or re.search(r"(?:机器识别码|机器码)", clean_msg, re.I):
+                # 兼容“解码版本”、“什么版本”、“版本是”
+                if any(x in clean_msg for x in ["授权凭证", "支持版本", "有哪些版本"]):
+                    is_decoder_msg = True
+                elif re.search(r"(?:机器识别码|机器码)", clean_msg, re.I):
                     is_decoder_msg = True
 
         if not cmd_type and not is_decoder_msg: return
@@ -380,6 +398,57 @@ class BotWorker:
                     return
         # --- [解码器结束] ---
 
+        # --- [新增] 群内绑定功能处理 ---
+        if self.enable_group_bind:
+            # 如果设置了绑定群号，则只在该群响应
+            target_bind_group = str(self.enable_bind_group).strip()
+            if not target_bind_group or str(group_id) == target_bind_group:
+                # 兼容“绑定”、“注册”、“账号绑定”
+                bind_match = re.search(r"(?:绑定|注册|账号绑定)\s*(\S+)\s*(?:账号[:：]?)?\s*(\S+)", clean_msg, re.I)
+                if bind_match:
+                    zone_name = re.sub(r"[,，:：\-\s]", "", bind_match.group(1).strip())
+                    account = re.sub(r"[,，:：\-\s]", "", bind_match.group(2).strip())
+                    
+                    filepath = self.get_filepath()
+                    zones, records = read_file_data(filepath)
+                    zones_list_txt = self.get_zones_msg(zones, records)
+
+                    # 1. 校验区服
+                    if zone_name not in zones:
+                        fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：【{zone_name}】不在开区名单内！\n\n{zones_list_txt}"
+                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        return
+
+                    # 2. 校验账号占用和个人上限
+                    my_binds = 0
+                    account_registered = False
+                    for r in records:
+                        try:
+                            p = r.split('|')
+                            if p[0] == f"{account}:{zone_name}": account_registered = True
+                            if p[1] == str(user_id): my_binds += 1
+                        except: continue
+
+                    if account_registered:
+                        fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：账号【{account}】在【{zone_name}】已被占用！\n\n{zones_list_txt}"
+                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        return
+
+                    if my_binds >= self.max_binds:
+                        fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：您在此区的名额已满({self.max_binds}个)！\n\n{zones_list_txt}"
+                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        return
+
+                    # 3. 写入记录
+                    new_record = f"{account}:{zone_name}|{user_id}|{nickname}"
+                    records.append(new_record)
+                    if write_file_data(filepath, zones, records):
+                        success_msg = f"[CQ:at,qq={user_id}] 🎉 绑定成功！\n区服：{zone_name}\n账号：{account}\n祝您游戏愉快！"
+                        await self.send_group_msg(websocket, group_id, success_msg)
+                        self.log_func(f"✅ 群内绑定成功: {new_record}")
+                    return
+        # --- [群内绑定结束] ---
+
         if not cmd_type: return
 
         # 2. 权限验证
@@ -412,21 +481,77 @@ class BotWorker:
                 prices_str = "/".join([f"{p}积分" for p in sorted(price_stats.keys())])
                 sdk_info = f" ({prices_str})"
 
-            reply = (
-                "【🛠️ 机器人功能菜单】\n"
-                "签到 (获得1积分)\n"
-                "积分 (查看个人积分)\n"
-                f"购买SDK{sdk_info}\n"
-                "--- 管理员指令 ---\n"
-                "查询所有SDK (仅限管理)\n"
-                "新增SDK 数量 价格 (仅限群主)\n"
-                "删除所有SDK (仅限群主)\n"
-                "黑名单QQ (查看列表)\n"
-                "加黑 QQ (拉黑)\n"
-                "删黑 QQ (移出)"
-            )
+            # 判断当前群是否为指定的绑定群
+            is_target_bind_group = False
+            if self.enable_group_bind:
+                target_bind_group = str(self.enable_bind_group).strip()
+                if not target_bind_group or str(group_id) == target_bind_group:
+                    is_target_bind_group = True
+
+            if is_target_bind_group:
+                reply = (
+                    "【🛠️ 机器人功能菜单】\n"
+                    "签到 (获得1积分)\n"
+                    "积分 (查看个人积分)\n"
+                    "绑定 区号 游戏账号 (例如:绑定 热血传奇二区 qwe123asd)\n"
+                    "开区列表\n"
+                    "查下名下账号\n"
+                    f"购买SDK{sdk_info}\n"
+                    "--- 管理员指令 ---\n"
+                    "查询所有SDK (仅限管理)\n"
+                    "新增SDK 数量 价格 (仅限群主)\n"
+                    "删除所有SDK (仅限群主)\n"
+                    "黑名单QQ (查看列表)\n"
+                    "加黑 QQ (拉黑)\n"
+                    "删黑 QQ (移出)"
+                )
+            else:
+                reply = (
+                    "【🛠️ 机器人功能菜单】\n"
+                    "签到 (获得1积分)\n"
+                    "积分 (查看个人积分)\n"
+                    f"购买SDK{sdk_info}\n"
+                    "--- 管理员指令 ---\n"
+                    "查询所有SDK (仅限管理)\n"
+                    "新增SDK 数量 价格 (仅限群主)\n"
+                    "删除所有SDK (仅限群主)\n"
+                    "黑名单QQ (查看列表)\n"
+                    "加黑 QQ (拉黑)\n"
+                    "删黑 QQ (移出)"
+                )
             await self.send_group_msg(websocket, group_id, reply)
+
+        elif cmd_type == "list_zones":
+            if not self.enable_group_bind: return
+            target_bind_group = str(self.enable_bind_group).strip()
+            if target_bind_group and str(group_id) != target_bind_group: return
             
+            filepath = self.get_filepath()
+            zones, records = read_file_data(filepath)
+            reply = f"[CQ:at,qq={user_id}] \n" + self.get_zones_msg(zones, records)
+            await self.send_group_msg(websocket, group_id, reply)
+
+        elif cmd_type == "list_my_accounts":
+            if not self.enable_group_bind: return
+            target_bind_group = str(self.enable_bind_group).strip()
+            if target_bind_group and str(group_id) != target_bind_group: return
+
+            filepath = self.get_filepath()
+            _, records = read_file_data(filepath)
+            found = []
+            for r in records:
+                try:
+                    parts = r.split('|')
+                    if len(parts) >= 2 and parts[1] == str(user_id):
+                        acc_zone = parts[0]
+                        acc, zone = acc_zone.split(':')
+                        found.append(f"账号：{acc} ({zone})")
+                except: pass
+            
+            content = "\n".join(found) if found else "未查询到记录"
+            reply = f"[CQ:at,qq={user_id}] \n【👤 您名下已绑定账号】\n{content}"
+            await self.send_group_msg(websocket, group_id, reply)
+
         elif cmd_type == "add_sdk":
             import random
             import string
