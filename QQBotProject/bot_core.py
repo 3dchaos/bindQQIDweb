@@ -323,8 +323,6 @@ class BotWorker:
                 self.table_bot_admin.upsert(dict(group_id=group_id, is_admin=is_bot_admin), ["group_id"])
             
         if not is_bot_admin:
-            # 只有是明确的指令或触发词时才提示，避免干扰日常聊天
-            await self.send_group_msg(websocket, group_id, "⚠️ 抱歉，本机器人必须拥有【群主/管理员】权限，才能在此群开启功能哦~")
             return
 
         # --- [新增] 解码器功能处理 ---
