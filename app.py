@@ -102,7 +102,7 @@ if __name__ == '__main__':
 
     # 检查并初始化文件
     if not os.path.exists(APP_CONFIG["file_path"]):
-        with open(APP_CONFIG["file_path"], 'w', encoding='gbk') as f:
+        with open(APP_CONFIG["file_path"], 'w', encoding='gbk', errors='replace') as f:
             f.write(";同区版本\n")
             f.write(";区列表:默认一区|默认二区\n")
         print(f"[*] 已创建新文件: {APP_CONFIG['file_path']}")

@@ -6,7 +6,7 @@ def read_file_data(filepath):
     if not filepath or not os.path.exists(filepath):
         return zones, records
     try:
-        with open(filepath, 'r', encoding='gbk') as f:
+        with open(filepath, 'r', encoding='gbk', errors='replace') as f:
             lines = f.readlines()
             if not lines: return zones, records
             
@@ -27,7 +27,7 @@ def write_file_data(filepath, zones, records):
     """将数据写入指定的文本文件，保持 GBK 编码"""
     if not filepath: return False
     try:
-        with open(filepath, 'w', encoding='gbk') as f:
+        with open(filepath, 'w', encoding='gbk', errors='replace') as f:
             f.write(f";区列表:{'|'.join(zones)}\n")
             for r in records: 
                 f.write(f"{r}\n")

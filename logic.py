@@ -50,7 +50,7 @@ def save_all(file_path, server_list, records):
     
     with FILE_LOCK:
         try:
-            with open(file_path, 'w', encoding='gbk') as f:
+            with open(file_path, 'w', encoding='gbk', errors='replace') as f:
                 # 1. 写入固定头
                 for h in default_headers:
                     f.write(h + "\n")

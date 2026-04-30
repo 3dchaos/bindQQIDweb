@@ -12,7 +12,7 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("老登群服管理中心")
-        self.root.geometry("900x600")
+        self.root.geometry("900x800")
         self.worker = None
 
         self.setup_ui()
@@ -61,6 +61,7 @@ class App:
         self.var_checkin = tk.BooleanVar(value=False)
         self.var_patrol = tk.BooleanVar(value=False)
         self.var_auto_join = tk.BooleanVar(value=False) # 新增：自动进群开关变量
+        self.var_auto_friend = tk.BooleanVar(value=False) # 新增：自动同意好友开关变量
         self.var_decoder = tk.BooleanVar(value=False) # 新增：解码器开关变量
         self.var_group_bind = tk.BooleanVar(value=False) # 新增：群绑定开关变量
 
@@ -68,6 +69,7 @@ class App:
         ttk.Checkbutton(grp_f, text="开启群签到 (子开关)", variable=self.var_checkin, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="巡逻群成员 (自动踢黑)", variable=self.var_patrol, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="自动识别邀请进群", variable=self.var_auto_join, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
+        ttk.Checkbutton(grp_f, text="自动同意好友请求", variable=self.var_auto_friend, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         
         # 解码器设置
         decoder_f = ttk.Frame(grp_f)
@@ -128,6 +130,7 @@ class App:
                 self.var_checkin.set(conf.get('enable_checkin', False))
                 self.var_patrol.set(conf.get('enable_patrol', False))
                 self.var_auto_join.set(conf.get('enable_auto_join', False))
+                self.var_auto_friend.set(conf.get('enable_auto_friend', False))
                 self.var_decoder.set(conf.get('enable_decoder', False))
                 self.ent_decoder_group.delete(0, "end")
                 self.ent_decoder_group.insert(0, str(conf.get('decoder_group', "")))
@@ -156,6 +159,7 @@ class App:
         manage = self.var_manage.get()
         checkin = self.var_checkin.get()
         patrol = self.var_patrol.get()
+        auto_friend = self.var_auto_friend.get()
         
         try:
             max_b = int(self.spin_limit.get())
@@ -173,6 +177,7 @@ class App:
                 enable_checkin=checkin,
                 enable_patrol=patrol,
                 enable_auto_join=self.var_auto_join.get(),
+                enable_auto_friend=auto_friend,
                 enable_decoder=self.var_decoder.get(),
                 decoder_group=self.ent_decoder_group.get().strip(),
                 enable_group_bind=self.var_group_bind.get(),
@@ -189,6 +194,7 @@ class App:
             self.worker.enable_patrol = patrol
             self.worker.max_binds = max_b
             self.worker.enable_auto_join = self.var_auto_join.get()
+            self.worker.enable_auto_friend = auto_friend
             self.worker.enable_decoder = self.var_decoder.get()
             self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
             self.worker.enable_group_bind = self.var_group_bind.get()
@@ -262,6 +268,7 @@ class App:
         self.worker.enable_checkin = self.var_checkin.get()
         self.worker.enable_patrol = self.var_patrol.get()
         self.worker.enable_auto_join = self.var_auto_join.get()
+        self.worker.enable_auto_friend = self.var_auto_friend.get()
         self.worker.enable_decoder = self.var_decoder.get()
         self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
         self.worker.enable_group_bind = self.var_group_bind.get()

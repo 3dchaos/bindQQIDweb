@@ -27,6 +27,7 @@ class BotWorker:
         self.enable_decoder_group = "" # 新增：指定监听解码的群号
         self.enable_group_bind = False # 新增：群绑定开关
         self.enable_bind_group = "" # 新增：指定监听绑定的群号
+        self.enable_auto_friend = False # 新增：自动同意好友开关
         self.running = False
         self.loop = None
         
@@ -109,7 +110,17 @@ class BotWorker:
     async def handle_private_message(self, websocket, data):
         sender = data.get("sender", {})
         qq_num = sender.get("user_id")
-        nickname = sender.get("nickname", "未知昵称")
+        
+        # 优化昵称处理：处理缺失、过滤可能破坏格式的特殊字符
+        raw_nickname = sender.get("nickname")
+        if not raw_nickname:
+            nickname = "无昵称"
+        else:
+            # 移除换行符、分隔符(|)和冒号(:)，防止破坏记录格式，并截断过长昵称
+            nickname = re.sub(r"[\r\n|:]", " ", str(raw_nickname)).strip()
+            if not nickname: nickname = "无昵称"
+            nickname = nickname[:20] # 限制长度防止超长
+            
         msg_text = data.get("raw_message", "").strip()
 
         filepath = self.get_filepath()
@@ -137,6 +148,23 @@ class BotWorker:
                 except: pass
             reply = "【👤 您名下已绑定账号】\n" + ("\n".join(found) if found else "未查询到记录")
             await self.send_private_msg(websocket, qq_num, reply)
+            return
+
+        # [新增] 指令：查询名下SDK
+        if any(re.search(x, msg_text, re.I) for x in ["查询名下SDK", "我的SDK", "我的sdk", "查询sdk", "查sdk"]):
+            my_sdks = list(self.table_sdk.find(buyer=qq_num))
+            if not my_sdks:
+                await self.send_private_msg(websocket, qq_num, "❌ 查询失败：您名下暂无购买记录。")
+                return
+
+            lines = [f"【👤 您名下已购 SDK 列表】", "━━━━━━━━━━━━━━"]
+            for s in my_sdks:
+                status = "🔴 已售出/已使用" if s['is_used'] else "🟢 未使用"
+                lines.append(f"🔑 SDK: {s['sdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}\n🏰 所属群号: {s['group_id']}")
+                lines.append("--------------")
+            
+            full_msg = "\n".join(lines)
+            await self.send_private_msg(websocket, qq_num, full_msg)
             return
 
         # 3. 绑定指令匹配
@@ -190,7 +218,8 @@ class BotWorker:
             "🤖 无法识别指令。请尝试：\n"
             "绑定 区号 游戏账号 (例如:绑定 热血传奇二区 qwe123asd)\n"
             "开区列表\n"
-            "查下名下账号"
+            "查下名下账号\n"
+            "查询名下SDK"
         )
         await self.send_private_msg(websocket, qq_num, default_reply)
 
@@ -229,7 +258,16 @@ class BotWorker:
         group_id = data.get("group_id")
         sender = data.get("sender", {})
         user_id = sender.get("user_id")
-        nickname = sender.get("nickname", "未知昵称")
+        
+        # 优化昵称处理：处理缺失、过滤特殊字符
+        raw_nickname = sender.get("nickname")
+        if not raw_nickname:
+            nickname = "无昵称"
+        else:
+            nickname = re.sub(r"[\r\n|:]", " ", str(raw_nickname)).strip()
+            if not nickname: nickname = "无昵称"
+            nickname = nickname[:20]
+            
         role = sender.get("role", "member")
         raw_msg = data.get("raw_message", "").strip()
         self_id = data.get("self_id")
@@ -312,6 +350,8 @@ class BotWorker:
                 cmd_params['price_input'] = m.group(1)
             elif any(re.search(x, clean_msg, re.I) for x in ["删除所有SDK", "清空SDK"]):
                 cmd_type = "clear_sdk"
+            elif any(re.search(x, clean_msg, re.I) for x in ["查询名下SDK", "我的SDK", "我的sdk", "查询sdk", "查sdk"]):
+                cmd_type = "list_my_sdk"
 
         # --- [独立匹配] 注册与查询类指令 (自然语言兼容) ---
         if self.enable_group_bind:
@@ -458,6 +498,10 @@ class BotWorker:
                         success_msg = f"[CQ:at,qq={user_id}] 🎉 绑定成功！\n区服：{zone_name}\n账号：{account}\n祝您游戏愉快！"
                         await self.send_group_msg(websocket, group_id, success_msg)
                         self.log_func(f"✅ 群内绑定成功: {new_record}")
+                    else:
+                        fail_msg = f"[CQ:at,qq={user_id}] ❌ 绑定失败：系统无法写入记录，请联系管理（可能由昵称特殊字符引起）。"
+                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        self.log_func(f"❌ 群内绑定失败: {new_record}")
                     return
         # --- [群内绑定结束] ---
 
@@ -509,6 +553,7 @@ class BotWorker:
                     "开区列表\n"
                     "查下名下账号\n"
                     f"购买SDK{sdk_info}\n"
+                    "查询名下SDK (查看已购密钥)\n"
                     "--- 管理员指令 ---\n"
                     "查询所有SDK (仅限管理)\n"
                     "新增SDK 数量 价格 (仅限群主)\n"
@@ -523,6 +568,7 @@ class BotWorker:
                     "签到 (获得1积分)\n"
                     "积分 (查看个人积分)\n"
                     f"购买SDK{sdk_info}\n"
+                    "查询名下SDK (查看已购密钥)\n"
                     "--- 管理员指令 ---\n"
                     "查询所有SDK (仅限管理)\n"
                     "新增SDK 数量 价格 (仅限群主)\n"
@@ -563,6 +609,22 @@ class BotWorker:
             content = "\n".join(found) if found else "未查询到记录"
             reply = f"[CQ:at,qq={user_id}] \n【👤 您名下已绑定账号】\n{content}"
             await self.send_group_msg(websocket, group_id, reply)
+
+        elif cmd_type == "list_my_sdk":
+            my_sdks = list(self.table_sdk.find(group_id=group_id, buyer=user_id))
+            if not my_sdks:
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] ❌ 查询失败：您名下暂无购买记录。")
+                return
+
+            lines = [f"【👤 您名下已购 SDK 列表】", "━━━━━━━━━━━━━━"]
+            for s in my_sdks:
+                status = "🔴 已售出/已使用" if s['is_used'] else "🟢 未使用"
+                lines.append(f"🔑 SDK: {s['sdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}")
+                lines.append("--------------")
+            
+            full_msg = "\n".join(lines)
+            await self.send_private_msg(websocket, user_id, full_msg)
+            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_sdks)} 条 SDK 记录私聊发送给您。")
 
         elif cmd_type == "add_sdk":
             import random
@@ -758,7 +820,17 @@ class BotWorker:
                 "approve": True
             })
 
+    async def handle_friend_request(self, websocket, data):
+        """处理好友请求"""
+        if not self.enable_auto_friend: return
 
+        user_id = data.get("user_id")
+        flag = data.get("flag")
+        self.log_func(f"🔔 发现好友请求：{user_id}，正在自动通过...")
+        await self.call_api(websocket, "set_friend_add_request", {
+            "flag": flag,
+            "approve": True
+        })
 
     async def start(self):
         self.running = True
@@ -812,7 +884,11 @@ class BotWorker:
                         
                         # 找到 post_type 判断区域，添加这个分支
                         elif data.get("post_type") == "request":
-                            asyncio.create_task(self.handle_group_request(websocket, data))
+                            req_type = data.get("request_type")
+                            if req_type == "group":
+                                asyncio.create_task(self.handle_group_request(websocket, data))
+                            elif req_type == "friend":
+                                asyncio.create_task(self.handle_friend_request(websocket, data))
                     except json.JSONDecodeError: pass
         except Exception as e:
             self.log_func(f"❌ 连接异常或断开: {e}")

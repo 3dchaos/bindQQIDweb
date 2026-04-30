@@ -16,16 +16,19 @@ def read_file_data(filepath):
     if not filepath or not os.path.exists(filepath):
         return zones, records
     try:
-        with open(filepath, 'r', encoding='gbk') as f:
+        with open(filepath, 'r', encoding='gbk', errors='replace') as f:
             lines = f.readlines()
             if not lines: return zones, records
+
             first_line = lines[0].strip()
             if first_line.startswith(';区列表:'):
                 z_str = first_line.replace(';区列表:', '')
                 if z_str: zones = z_str.split('|')
+
             for line in lines[1:]:
                 line = line.strip()
-                if line and not line.startswith(';'): records.append(line)
+                if line and not line.startswith(';'): 
+                    records.append(line)
     except Exception as e:
         print(f"读取文件错误: {e}")
     return zones, records
@@ -33,7 +36,7 @@ def read_file_data(filepath):
 def write_file_data(filepath, zones, records):
     if not filepath: return False
     try:
-        with open(filepath, 'w', encoding='gbk') as f:
+        with open(filepath, 'w', encoding='gbk', errors='replace') as f:
             f.write(f";区列表:{'|'.join(zones)}\n")
             for r in records: f.write(f"{r}\n")
         return True
@@ -152,6 +155,9 @@ class BotWorker:
             if write_file_data(filepath, zones, records):
                 await self.send_private_msg(websocket, qq_num, f"成功绑定！\n账号：{account}\n区服：{zone_name}\nQQ：{qq_num}")
                 self.log_func(f"✅ 私聊绑定成功: {new_record}")
+            else:
+                await self.send_private_msg(websocket, qq_num, "❌ 绑定失败：系统无法写入记录，请联系管理员。")
+                self.log_func(f"❌ 私聊绑定失败: {new_record}")
             return
 
     # --- 处理群成员加入事件 (自动踢黑逻辑) ---

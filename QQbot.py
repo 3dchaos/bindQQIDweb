@@ -21,7 +21,7 @@ def read_file_data():
     if not os.path.exists(DATA_FILE):
         return zones, records
     try:
-        with open(DATA_FILE, 'r', encoding='gbk') as f:
+        with open(DATA_FILE, 'r', encoding='gbk', errors='replace') as f:
             lines = f.readlines()
             if not lines:
                 return zones, records
@@ -45,7 +45,7 @@ def read_file_data():
 def write_file_data(zones, records):
     """将数据写入文本，保证第一行格式和整体 GBK 编码"""
     try:
-        with open(DATA_FILE, 'w', encoding='gbk') as f:
+        with open(DATA_FILE, 'w', encoding='gbk', errors='replace') as f:
             f.write(f";区列表:{'|'.join(zones)}\n")
             for r in records:
                 f.write(f"{r}\n")
