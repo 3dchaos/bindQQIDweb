@@ -150,17 +150,17 @@ class BotWorker:
             await self.send_private_msg(websocket, qq_num, reply)
             return
 
-        # [新增] 指令：查询名下SDK
-        if any(re.search(x, msg_text, re.I) for x in ["查询名下SDK", "我的SDK", "我的sdk", "查询sdk", "查sdk"]):
-            my_sdks = list(self.table_sdk.find(buyer=qq_num))
-            if not my_sdks:
+        # [新增] 指令：查询名下CDK
+        if any(re.search(x, msg_text, re.I) for x in ["查询名下CDK", "我的CDK", "我的cdk", "查询cdk", "查cdk", "查询名下卡密", "我的卡密", "查询卡密", "查卡密", "查询名下密钥", "我的密钥", "查询密钥", "查密钥"]):
+            my_cdks = list(self.table_cdk.find(buyer=qq_num))
+            if not my_cdks:
                 await self.send_private_msg(websocket, qq_num, "❌ 查询失败：您名下暂无购买记录。")
                 return
 
-            lines = [f"【👤 您名下已购 SDK 列表】", "━━━━━━━━━━━━━━"]
-            for s in my_sdks:
+            lines = [f"【👤 您名下已购 CDK 列表】", "━━━━━━━━━━━━━━"]
+            for s in my_cdks:
                 status = "🔴 已售出/已使用" if s['is_used'] else "🟢 未使用"
-                lines.append(f"🔑 SDK: {s['sdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}\n🏰 所属群号: {s['group_id']}")
+                lines.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}\n🏰 所属群号: {s['group_id']}")
                 lines.append("--------------")
             
             full_msg = "\n".join(lines)
@@ -219,7 +219,7 @@ class BotWorker:
             "绑定 区号 游戏账号 (例如:绑定 热血传奇二区 qwe123asd)\n"
             "开区列表\n"
             "查下名下账号\n"
-            "查询名下SDK"
+            "查询名下CDK"
         )
         await self.send_private_msg(websocket, qq_num, default_reply)
 
@@ -314,15 +314,15 @@ class BotWorker:
             elif any(re.search(x, clean_msg, re.I) for x in ["积分", "积分点", "我的积分", "查询积分", "查积分", "余额"]):
                 cmd_type = "points"
             
-            # --- SDK 管理类 ---
-            elif re.match(r"^/?(?:新增SDK|添加SDK)\s*(.*)$", clean_msg, re.I):
-                cmd_type = "add_sdk"
-                m = re.match(r"^/?(?:新增SDK|添加SDK)\s*(.*)$", clean_msg, re.I)
+            # --- CDK 管理类 ---
+            elif re.match(r"^/?(?:新增CDK|添加CDK|新增卡密|添加卡密|新增密钥|添加密钥)\s*(.*)$", clean_msg, re.I):
+                cmd_type = "add_cdk"
+                m = re.match(r"^/?(?:新增CDK|添加CDK|新增卡密|添加卡密|新增密钥|添加密钥)\s*(.*)$", clean_msg, re.I)
                 params_str = m.group(1).strip()
                 parts = params_str.split()
                 
                 if len(parts) != 2:
-                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增SDK [数量] [价格]\n例如：新增SDK 10 50")
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增CDK [数量] [价格]\n例如：新增CDK 10 50")
                     return
 
                 try:
@@ -342,16 +342,16 @@ class BotWorker:
 
                 cmd_params['qty'] = qty
                 cmd_params['price'] = price
-            elif any(re.search(x, clean_msg, re.I) for x in ["查询所有SDK", "列出所有SDK"]):
-                cmd_type = "list_sdk"
-            elif re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)\s*(\d+)?.*$", clean_msg, re.I):
-                cmd_type = "buy_sdk"
-                m = re.match(r"^(?:购买SDK|兑换SDK|买SDK|获取SDK)\s*(\d+)?.*$", clean_msg, re.I)
+            elif any(re.search(x, clean_msg, re.I) for x in ["查询所有CDK", "列出所有CDK", "查询所有卡密", "列出所有卡密", "查询所有密钥", "列出所有密钥"]):
+                cmd_type = "list_cdk"
+            elif re.match(r"^(?:购买CDK|兑换CDK|买CDK|获取CDK|购买卡密|兑换卡密|买卡密|获取卡密|购买密钥|兑换密钥|买密钥|获取密钥)\s*(\d+)?.*$", clean_msg, re.I):
+                cmd_type = "buy_cdk"
+                m = re.match(r"^(?:购买CDK|兑换CDK|买CDK|获取CDK|购买卡密|兑换卡密|买卡密|获取卡密|购买密钥|兑换密钥|买密钥|获取密钥)\s*(\d+)?.*$", clean_msg, re.I)
                 cmd_params['price_input'] = m.group(1)
-            elif any(re.search(x, clean_msg, re.I) for x in ["删除所有SDK", "清空SDK"]):
-                cmd_type = "clear_sdk"
-            elif any(re.search(x, clean_msg, re.I) for x in ["查询名下SDK", "我的SDK", "我的sdk", "查询sdk", "查sdk"]):
-                cmd_type = "list_my_sdk"
+            elif any(re.search(x, clean_msg, re.I) for x in ["删除所有CDK", "清空CDK", "删除所有卡密", "清空卡密", "删除所有密钥", "清空密钥"]):
+                cmd_type = "clear_cdk"
+            elif any(re.search(x, clean_msg, re.I) for x in ["查询名下CDK", "我的CDK", "我的cdk", "查询cdk", "查cdk", "查询名下卡密", "我的卡密", "查询卡密", "查卡密", "查询名下密钥", "我的密钥", "查询密钥", "查密钥"]):
+                cmd_type = "list_my_cdk"
 
         # --- [独立匹配] 注册与查询类指令 (自然语言兼容) ---
         if self.enable_group_bind:
@@ -511,7 +511,7 @@ class BotWorker:
         is_owner = role == "owner"
         is_admin = role in ["owner", "admin"]
 
-        if cmd_type in ["add_sdk", "clear_sdk"]:
+        if cmd_type in ["add_cdk", "clear_cdk"]:
             if not is_owner:
                 await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【群主】使用。")
                 return
@@ -523,19 +523,19 @@ class BotWorker:
 
         # ================ 路由 ================
         if cmd_type == "menu":
-            # 动态读取本群未使用的SDK价格
-            sdks_in_db = list(self.table_sdk.find(group_id=group_id, is_used=0))
+            # 动态读取本群未使用的CDK价格
+            cdks_in_db = list(self.table_cdk.find(group_id=group_id, is_used=0))
             price_stats = {}
-            for s in sdks_in_db:
+            for s in cdks_in_db:
                 p = s['price']
                 price_stats[p] = price_stats.get(p, 0) + 1
             
-            sdk_info = ""
+            cdk_info = ""
             if not price_stats:
-                sdk_info = " (暂无可用SDK)"
+                cdk_info = " (暂无可用CDK)"
             else:
                 prices_str = "/".join([f"{p}积分" for p in sorted(price_stats.keys())])
-                sdk_info = f" ({prices_str})"
+                cdk_info = f" ({prices_str})"
 
             # 判断当前群是否为指定的绑定群
             is_target_bind_group = False
@@ -552,12 +552,12 @@ class BotWorker:
                     "绑定 区号 游戏账号 (例如:绑定 热血传奇二区 qwe123asd)\n"
                     "开区列表\n"
                     "查下名下账号\n"
-                    f"购买SDK{sdk_info}\n"
-                    "查询名下SDK (查看已购密钥)\n"
+                    f"购买CDK{cdk_info}\n"
+                    "查询名下CDK (查看已购卡密)\n"
                     "--- 管理员指令 ---\n"
-                    "查询所有SDK (仅限管理)\n"
-                    "新增SDK 数量 价格 (仅限群主)\n"
-                    "删除所有SDK (仅限群主)\n"
+                    "查询所有CDK (仅限群主)\n"
+                    "新增CDK 数量 价格 (仅限群主)\n"
+                    "删除所有CDK (仅限群主)\n"
                     "黑名单QQ (查看列表)\n"
                     "加黑 QQ (拉黑)\n"
                     "删黑 QQ (移出)"
@@ -567,12 +567,12 @@ class BotWorker:
                     "【🛠️ 机器人功能菜单】\n"
                     "签到 (获得1积分)\n"
                     "积分 (查看个人积分)\n"
-                    f"购买SDK{sdk_info}\n"
-                    "查询名下SDK (查看已购密钥)\n"
+                    f"购买CDK{cdk_info}\n"
+                    "查询名下CDK (查看已购卡密)\n"
                     "--- 管理员指令 ---\n"
-                    "查询所有SDK (仅限管理)\n"
-                    "新增SDK 数量 价格 (仅限群主)\n"
-                    "删除所有SDK (仅限群主)\n"
+                    "查询所有CDK (仅限群主)\n"
+                    "新增CDK 数量 价格 (仅限群主)\n"
+                    "删除所有CDK (仅限群主)\n"
                     "黑名单QQ (查看列表)\n"
                     "加黑 QQ (拉黑)\n"
                     "删黑 QQ (移出)"
@@ -610,23 +610,23 @@ class BotWorker:
             reply = f"[CQ:at,qq={user_id}] \n【👤 您名下已绑定账号】\n{content}"
             await self.send_group_msg(websocket, group_id, reply)
 
-        elif cmd_type == "list_my_sdk":
-            my_sdks = list(self.table_sdk.find(group_id=group_id, buyer=user_id))
-            if not my_sdks:
+        elif cmd_type == "list_my_cdk":
+            my_cdks = list(self.table_cdk.find(group_id=group_id, buyer=user_id))
+            if not my_cdks:
                 await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] ❌ 查询失败：您名下暂无购买记录。")
                 return
 
-            lines = [f"【👤 您名下已购 SDK 列表】", "━━━━━━━━━━━━━━"]
-            for s in my_sdks:
+            lines = [f"【👤 您名下已购 CDK 列表】", "━━━━━━━━━━━━━━"]
+            for s in my_cdks:
                 status = "🔴 已售出/已使用" if s['is_used'] else "🟢 未使用"
-                lines.append(f"🔑 SDK: {s['sdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}")
+                lines.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}")
                 lines.append("--------------")
             
             full_msg = "\n".join(lines)
             await self.send_private_msg(websocket, user_id, full_msg)
-            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_sdks)} 条 SDK 记录私聊发送给您。")
+            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_cdks)} 条 CDK 记录私聊发送给您。")
 
-        elif cmd_type == "add_sdk":
+        elif cmd_type == "add_cdk":
             import random
             import string
             
@@ -634,26 +634,26 @@ class BotWorker:
             price = cmd_params['price']
             
             # 检查当前数据库总量
-            current_total = self.table_sdk.count(group_id=group_id)
+            current_total = self.table_cdk.count(group_id=group_id)
             if current_total + qty > 100:
                 available = 100 - current_total
                 await self.send_group_msg(websocket, group_id, 
-                    f"❌ 新增失败：本群 SDK 总容量上限为 100 条。\n"
+                    f"❌ 新增失败：本群 CDK 总容量上限为 100 条。\n"
                     f"当前已存在：{current_total} 条\n"
                     f"本次尝试新增：{qty} 条\n"
                     f"剩余空间：{max(0, available)} 条\n"
-                    f"💡 请先执行【删除所有SDK】后再批量新增。")
+                    f"💡 请先执行【删除所有CDK】后再批量新增。")
                 return
 
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             success_count = 0
             for _ in range(qty):
-                random_sdk = ''.join(random.choices(string.digits, k=13))
+                random_cdk = ''.join(random.choices(string.digits, k=13))
                 try:
-                    self.table_sdk.insert(dict(
+                    self.table_cdk.insert(dict(
                         group_id=group_id,
-                        sdk=random_sdk,
+                        cdk=random_cdk,
                         is_used=0,
                         price=price,
                         buyer=None,
@@ -665,39 +665,71 @@ class BotWorker:
                     self.log_func(f"❌ 数据库写入失败: {e}")
 
             await self.send_group_msg(websocket, group_id, 
-                f"✅ SDK 生成成功！\n群号：{group_id}\n新增数量：{success_count}\n单价：{price} 积分\n时间：{now_str}")
+                f"✅ CDK 生成成功！\n群号：{group_id}\n新增数量：{success_count}\n单价：{price} 积分\n时间：{now_str}")
 
-        elif clean_msg == "查询所有SDK":
-            if not is_admin:
-                await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【管理】使用。")
+        elif any(clean_msg == x for x in ["查询所有CDK", "查询所有卡密", "查询所有密钥"]):
+            if not is_owner:
+                await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【群主】使用。")
                 return
             
-            all_sdks = list(self.table_sdk.find(group_id=group_id))
-            if not all_sdks:
-                await self.send_group_msg(websocket, group_id, "❌ 查询失败：本群数据库中暂无 SDK 记录。")
+            all_cdks = list(self.table_cdk.find(group_id=group_id))
+            if not all_cdks:
+                await self.send_group_msg(websocket, group_id, "❌ 查询失败：本群数据库中暂无 CDK 记录。")
                 return
 
-            lines = [f"【📋 群 {group_id} SDK 全量列表】", "━━━━━━━━━━━━━━"]
-            for s in all_sdks:
+            # --- 1. 生成详情版消息 ---
+            lines_detail = [f"【📋 群 {group_id} CDK 详情全量列表】", "━━━━━━━━━━━━━━"]
+            for s in all_cdks:
                 status = "🔴 已使用" if s['is_used'] else "🟢 未使用"
                 buyer_info = f" | 购买人: {s['buyer']}" if s['buyer'] else ""
-                lines.append(f"🔑 SDK: {s['sdk']}\n💰 价格: {s['price']} | 状态: {status}{buyer_info}")
-                lines.append("--------------")
+                lines_detail.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']} | 状态: {status}{buyer_info}")
+                lines_detail.append("--------------")
             
-            full_msg = "\n".join(lines)
-            await self.send_private_msg(websocket, user_id, full_msg)
-            await self.send_group_msg(websocket, group_id, f"✅ 已将本群所有 SDK 记录({len(all_sdks)}条)私聊发送给管理。")
+            detail_msg = "\n".join(lines_detail)
+            await self.send_private_msg(websocket, user_id, detail_msg)
 
-        elif re.match(r"^购买SDK(?:\s+(\d+))?$", clean_msg):
-            # 获取本群所有未使用的SDK价格
-            available_sdks = list(self.table_sdk.find(group_id=group_id, is_used=0))
-            if not available_sdks:
-                await self.send_group_msg(websocket, group_id, "❌ 购买失败：当前仓库内暂无可用 SDK。")
+            # --- 2. 生成简洁版消息 ---
+            data_map = {} # { price: { "used": [], "unused": [] } }
+            for s in all_cdks:
+                p = s['price']
+                if p not in data_map:
+                    data_map[p] = {"used": [], "unused": []}
+                if s['is_used']:
+                    data_map[p]["used"].append(s['cdk'])
+                else:
+                    data_map[p]["unused"].append(s['cdk'])
+
+            lines_brief = [f"【📋 群 {group_id} CDK 简洁分类报表】", "━━━━━━━━━━━━━━"]
+            for price in sorted(data_map.keys()):
+                lines_brief.append(f"💰 价格为 {price} 积分")
+                used_list = data_map[price]["used"]
+                lines_brief.append(f"  🔴 已购买 ({len(used_list)} 条)")
+                if used_list:
+                    for cdk in used_list: lines_brief.append(f"    {cdk}")
+                else: lines_brief.append("    (无)")
+                
+                unused_list = data_map[price]["unused"]
+                lines_brief.append(f"  🟢 未购买 ({len(unused_list)} 条)")
+                if unused_list:
+                    for cdk in unused_list: lines_brief.append(f"    {cdk}")
+                else: lines_brief.append("    (无)")
+                lines_brief.append("--------------")
+            
+            brief_msg = "\n".join(lines_brief)
+            await self.send_private_msg(websocket, user_id, brief_msg)
+            
+            await self.send_group_msg(websocket, group_id, f"✅ 已将本群 CDK 的【详情列表】与【简洁报表】私聊发送给群主。")
+
+        elif re.match(r"^购买(?:CDK|卡密|密钥)(?:\s+(\d+))?$", clean_msg):
+            # 获取本群所有未使用的CDK价格
+            available_cdks = list(self.table_cdk.find(group_id=group_id, is_used=0))
+            if not available_cdks:
+                await self.send_group_msg(websocket, group_id, "❌ 购买失败：当前仓库内暂无可用 CDK。")
                 return
 
-            distinct_prices = sorted(list(set([s['price'] for s in available_sdks])))
+            distinct_prices = sorted(list(set([s['price'] for s in available_cdks])))
             
-            m = re.match(r"^购买SDK(?:\s+(\d+))?$", clean_msg)
+            m = re.match(r"^购买(?:CDK|卡密|密钥)(?:\s+(\d+))?$", clean_msg)
             input_price_str = m.group(1)
             
             target_price = None
@@ -708,13 +740,13 @@ class BotWorker:
                     target_price = distinct_prices[0]
                 else:
                     prices_list = "/".join([str(p) for p in distinct_prices])
-                    await self.send_group_msg(websocket, group_id, f"💡 请输入具体的购买价格，例如：购买SDK {distinct_prices[0]}\n当前可用价格：{prices_list}")
+                    await self.send_group_msg(websocket, group_id, f"💡 请输入具体的购买价格，例如：购买CDK {distinct_prices[0]}\n当前可用价格：{prices_list}")
                     return
 
             # 校验该价格是否有库存
-            sdk_record = self.table_sdk.find_one(group_id=group_id, price=target_price, is_used=0)
-            if not sdk_record:
-                await self.send_group_msg(websocket, group_id, f"❌ 购买失败：价格为 {target_price} 的 SDK 已售罄。")
+            cdk_record = self.table_cdk.find_one(group_id=group_id, price=target_price, is_used=0)
+            if not cdk_record:
+                await self.send_group_msg(websocket, group_id, f"❌ 购买失败：价格为 {target_price} 的 CDK 已售罄。")
                 return
             
             # 校验积分
@@ -729,18 +761,18 @@ class BotWorker:
             new_points = user_record['points'] - target_price
             
             self.table_group.update(dict(id=user_record['id'], points=new_points), ['id'])
-            self.table_sdk.update(dict(
-                id=sdk_record['id'], 
+            self.table_cdk.update(dict(
+                id=cdk_record['id'], 
                 is_used=1, 
                 buyer=user_id, 
                 buy_time=now_str
             ), ['id'])
             
-            # 私聊发送SDK给购买者
+            # 私聊发送CDK给购买者
             private_msg = (
                 f"🎉 购买成功！\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"🔑 您的 SDK：{sdk_record['sdk']}\n"
+                f"🔑 您的 CDK：{cdk_record['cdk']}\n"
                 f"💰 消耗积分：{target_price}\n"
                 f"📅 购买时间：{now_str}\n"
                 f"━━━━━━━━━━━━━━"
@@ -748,16 +780,16 @@ class BotWorker:
             await self.send_private_msg(websocket, user_id, private_msg)
             
             # 群内提示
-            await self.send_group_msg(websocket, group_id, f"🎉 [CQ:at,qq={user_id}] 购买成功！\n消耗积分：{target_price}\n密钥已通过【私聊】发送，请注意查收。")
+            await self.send_group_msg(websocket, group_id, f"🎉 [CQ:at,qq={user_id}] 购买成功！\n消耗积分：{target_price}\nCDK已通过【私聊】发送，请注意查收。")
 
-        elif cmd_type == "clear_sdk":
+        elif cmd_type == "clear_cdk":
             try:
-                self.table_sdk.delete(group_id=group_id)
-                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 SDK 记录。")
-                self.log_func(f"✅ SDK清空: 群 {group_id}")
+                self.table_cdk.delete(group_id=group_id)
+                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 CDK 记录。")
+                self.log_func(f"✅ CDK清空: 群 {group_id}")
             except Exception as e:
                 await self.send_group_msg(websocket, group_id, f"❌ 清空失败：数据库操作异常。\n错误信息：{str(e)}")
-                self.log_func(f"❌ SDK清空失败: {e}")
+                self.log_func(f"❌ CDK清空失败: {e}")
 
         elif cmd_type == "checkin":
             if not self.enable_checkin: return
@@ -839,7 +871,7 @@ class BotWorker:
             self.table_group = self.db['QQgroup']
             self.table_blacklist = self.db['Blacklist']
             self.table_bot_admin = self.db['BotGroupAdmin']
-            self.table_sdk = self.db['SDK']
+            self.table_cdk = self.db['CDK']
             self.log_func("✅ 数据库加载成功")
         except Exception as e:
             self.log_func(f"❌ 数据库异常: {e}")
