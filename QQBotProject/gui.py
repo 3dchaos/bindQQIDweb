@@ -64,6 +64,9 @@ class App:
         self.var_auto_friend = tk.BooleanVar(value=False) # 新增：自动同意好友开关变量
         self.var_decoder = tk.BooleanVar(value=False) # 新增：解码器开关变量
         self.var_group_bind = tk.BooleanVar(value=False) # 新增：群绑定开关变量
+        self.var_auto_recall = tk.BooleanVar(value=False) # 新增：3秒撤回开关变量
+        self.var_recall_delay = tk.IntVar(value=3) # 新增：撤回延迟秒数
+        self.recall_cmds_vars = {} # 存储各个指令是否开启撤回的变量
 
         ttk.Checkbutton(grp_f, text="开启群管理 (总开关)", variable=self.var_manage, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="开启群签到 (子开关)", variable=self.var_checkin, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
@@ -71,6 +74,35 @@ class App:
         ttk.Checkbutton(grp_f, text="自动识别邀请进群", variable=self.var_auto_join, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         ttk.Checkbutton(grp_f, text="自动同意好友请求", variable=self.var_auto_friend, command=self.update_bot_flags).pack(anchor="w", padx=10, pady=2)
         
+        # 撤回设置
+        recall_f = ttk.LabelFrame(left_frame, text="撤回设置")
+        recall_f.pack(fill="x", pady=5)
+        
+        rc_top = ttk.Frame(recall_f)
+        rc_top.pack(fill="x", padx=10, pady=2)
+        ttk.Checkbutton(rc_top, text="开启自动撤回", variable=self.var_auto_recall, command=self.update_bot_flags).pack(side="left")
+        ttk.Label(rc_top, text=" 延迟(秒):").pack(side="left")
+        self.spin_recall_delay = tk.Spinbox(rc_top, from_=1, to=3600, width=5, textvariable=self.var_recall_delay, command=self.update_bot_flags)
+        self.spin_recall_delay.pack(side="left", padx=5)
+
+        # 指令选择列表
+        self.recall_cmds_frame = ttk.Frame(recall_f)
+        self.recall_cmds_frame.pack(fill="x", padx=10, pady=2)
+        
+        commands = [
+            ("menu", "菜单/功能"), ("checkin", "签到"), ("points", "查询积分"),
+            ("buy_cdk", "购买CDK"), ("list_my_cdk", "我的CDK"), ("list_zones", "开区列表"),
+            ("list_my_accounts", "我的账号"), ("group_bind", "群内绑定"), ("decoder", "解码功能"),
+            ("admin", "管理指令"), ("patrol", "巡逻提示")
+        ]
+        
+        # 分两列显示
+        for i, (cmd_id, cmd_name) in enumerate(commands):
+            var = tk.BooleanVar(value=True)
+            self.recall_cmds_vars[cmd_id] = var
+            cb = ttk.Checkbutton(self.recall_cmds_frame, text=cmd_name, variable=var, command=self.update_bot_flags)
+            cb.grid(row=i//2, column=i%2, sticky="w", padx=5)
+
         # 解码器设置
         decoder_f = ttk.Frame(grp_f)
         decoder_f.pack(fill="x", padx=10, pady=2)
@@ -108,6 +140,7 @@ class App:
         btn_f.pack(fill="x", pady=5)
         ttk.Button(btn_f, text="添加", command=self.add_zone).pack(side="left", padx=5, expand=True, fill="x")
         ttk.Button(btn_f, text="删除", command=self.del_zone).pack(side="left", padx=5, expand=True, fill="x")
+        ttk.Button(btn_f, text="清理不在列表的注册", command=self.cleanup_records).pack(side="left", padx=5, expand=True, fill="x")
         ttk.Button(left_frame, text="🔃 刷新文本数据", command=self.load_data).pack(fill="x", pady=5)
 
         # 右侧日志
@@ -131,6 +164,19 @@ class App:
                 self.var_patrol.set(conf.get('enable_patrol', False))
                 self.var_auto_join.set(conf.get('enable_auto_join', False))
                 self.var_auto_friend.set(conf.get('enable_auto_friend', False))
+                self.var_auto_recall.set(conf.get('enable_auto_recall', False))
+                self.var_recall_delay.set(conf.get('recall_delay', 3))
+                
+                # 加载撤回指令列表
+                import json
+                saved_cmds = conf.get('recall_cmds', "")
+                if saved_cmds:
+                    try:
+                        cmds_list = json.loads(saved_cmds)
+                        for cid, var in self.recall_cmds_vars.items():
+                            var.set(cid in cmds_list)
+                    except: pass
+
                 self.var_decoder.set(conf.get('enable_decoder', False))
                 self.ent_decoder_group.delete(0, "end")
                 self.ent_decoder_group.insert(0, str(conf.get('decoder_group', "")))
@@ -160,6 +206,13 @@ class App:
         checkin = self.var_checkin.get()
         patrol = self.var_patrol.get()
         auto_friend = self.var_auto_friend.get()
+        auto_recall = self.var_auto_recall.get()
+        recall_delay = self.var_recall_delay.get()
+        
+        # 获取开启撤回的指令列表
+        import json
+        recall_cmds = [cid for cid, var in self.recall_cmds_vars.items() if var.get()]
+        recall_cmds_json = json.dumps(recall_cmds)
         
         try:
             max_b = int(self.spin_limit.get())
@@ -178,6 +231,9 @@ class App:
                 enable_patrol=patrol,
                 enable_auto_join=self.var_auto_join.get(),
                 enable_auto_friend=auto_friend,
+                enable_auto_recall=auto_recall,
+                recall_delay=recall_delay,
+                recall_cmds=recall_cmds_json,
                 enable_decoder=self.var_decoder.get(),
                 decoder_group=self.ent_decoder_group.get().strip(),
                 enable_group_bind=self.var_group_bind.get(),
@@ -195,6 +251,9 @@ class App:
             self.worker.max_binds = max_b
             self.worker.enable_auto_join = self.var_auto_join.get()
             self.worker.enable_auto_friend = auto_friend
+            self.worker.enable_auto_recall = auto_recall
+            self.worker.recall_delay = recall_delay
+            self.worker.recall_cmds = recall_cmds
             self.worker.enable_decoder = self.var_decoder.get()
             self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
             self.worker.enable_group_bind = self.var_group_bind.get()
@@ -252,6 +311,34 @@ class App:
             self.list_zones.delete(sel)
             self.sync_to_file()
 
+    def cleanup_records(self):
+        path = self.get_current_file()
+        if not os.path.exists(path): return
+        
+        zones, recs = read_file_data(path)
+        valid_records = []
+        removed_count = 0
+        
+        for r in recs:
+            try:
+                acc_zone = r.split('|')[0]
+                zone = acc_zone.rsplit(':', 1)[-1]
+                if zone in zones:
+                    valid_records.append(r)
+                else:
+                    removed_count += 1
+            except:
+                removed_count += 1
+        
+        if removed_count > 0:
+            if write_file_data(path, zones, valid_records):
+                self.log(f"清理完成: 已删除 {removed_count} 条失效注册记录 (所属区服不在列表中)")
+                self.load_data()
+            else:
+                self.log("❌ 清理失败: 无法写入文件")
+        else:
+            self.log("提示: 未发现失效注册记录，无需清理")
+
     def start_bot(self):
         url = self.ent_url.get().strip()
         token = self.ent_token.get().strip()
@@ -269,6 +356,9 @@ class App:
         self.worker.enable_patrol = self.var_patrol.get()
         self.worker.enable_auto_join = self.var_auto_join.get()
         self.worker.enable_auto_friend = self.var_auto_friend.get()
+        self.worker.enable_auto_recall = self.var_auto_recall.get()
+        self.worker.recall_delay = self.var_recall_delay.get()
+        self.worker.recall_cmds = [cid for cid, var in self.recall_cmds_vars.items() if var.get()]
         self.worker.enable_decoder = self.var_decoder.get()
         self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
         self.worker.enable_group_bind = self.var_group_bind.get()

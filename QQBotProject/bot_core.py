@@ -28,6 +28,9 @@ class BotWorker:
         self.enable_group_bind = False # 新增：群绑定开关
         self.enable_bind_group = "" # 新增：指定监听绑定的群号
         self.enable_auto_friend = False # 新增：自动同意好友开关
+        self.enable_auto_recall = False # 新增：3秒撤回开关
+        self.recall_delay = 3 # 新增：撤回延迟
+        self.recall_cmds = [] # 新增：需要撤回的指令列表
         self.running = False
         self.loop = None
         
@@ -55,8 +58,22 @@ class BotWorker:
     async def send_private_msg(self, websocket, user_id, text):
         await websocket.send(json.dumps({"action": "send_private_msg", "params": {"user_id": user_id, "message": text}}))
 
-    async def send_group_msg(self, websocket, group_id, text):
-        await websocket.send(json.dumps({"action": "send_group_msg", "params": {"group_id": group_id, "message": text}}))
+    async def send_group_msg(self, websocket, group_id, text, cmd_type=None):
+        # 使用 call_api 以获取 message_id 用于撤回
+        data = await self.call_api(websocket, "send_group_msg", {"group_id": group_id, "message": text})
+        
+        should_recall = False
+        if self.enable_auto_recall:
+            if cmd_type in self.recall_cmds:
+                should_recall = True
+        
+        if should_recall and data and "message_id" in data:
+            message_id = data["message_id"]
+            async def delayed_recall():
+                await asyncio.sleep(self.recall_delay)
+                await self.call_api(websocket, "delete_msg", {"message_id": message_id})
+                self.log_func(f"🕒 已自动撤回机器人消息({cmd_type}): {message_id}")
+            asyncio.create_task(delayed_recall())
 
     
     # --- [辅助方法] 生成通用的开区列表回复文本 ---
@@ -66,7 +83,8 @@ class BotWorker:
             try:
                 # 记录格式: account:zone|qq|nickname
                 acc_zone = r.split('|')[0]
-                zone = acc_zone.split(':')[1]
+                # 使用 rsplit 确保取到最后一个冒号后的区名，适配账号含冒号的情况
+                zone = acc_zone.rsplit(':', 1)[-1]
                 if zone in counts: counts[zone] += 1
             except: pass
         
@@ -143,7 +161,8 @@ class BotWorker:
                     parts = r.split('|')
                     if len(parts) >= 2 and parts[1] == str(qq_num):
                         acc_zone = parts[0]
-                        acc, zone = acc_zone.split(':')
+                        # 使用 rsplit 适配账号含冒号的情况
+                        acc, zone = acc_zone.rsplit(':', 1)
                         found.append(f"账号：{acc} ({zone})")
                 except: pass
             reply = "【👤 您名下已绑定账号】\n" + ("\n".join(found) if found else "未查询到记录")
@@ -190,7 +209,9 @@ class BotWorker:
                 try:
                     p = r.split('|')
                     if p[0] == f"{account}:{zone_name}": account_registered = True
-                    if p[1] == str(qq_num): my_binds += 1
+                    # 仅统计当前区的绑定数量
+                    if p[1] == str(qq_num) and p[0].rsplit(':', 1)[-1] == zone_name:
+                        my_binds += 1
                 except: continue
 
             if account_registered:
@@ -247,7 +268,7 @@ class BotWorker:
 
             if is_bot_admin:
                 await self.call_api(websocket, "set_group_kick", {"group_id": group_id, "user_id": int(user_id), "reject_add_request": False})
-                await self.send_group_msg(websocket, group_id, f"{user_id}为本群黑名单，已将他踢出群。")
+                await self.send_group_msg(websocket, group_id, f"{user_id}为本群黑名单，已将他踢出群。", cmd_type="patrol")
                 self.log_func(f"✅ 巡逻踢黑成功: 已自动清退成员 {user_id}")
             else:
                 self.log_func(f"❌ 巡逻踢黑失败: 机器人在群 {group_id} 没有管理员权限。")
@@ -271,6 +292,7 @@ class BotWorker:
         role = sender.get("role", "member")
         raw_msg = data.get("raw_message", "").strip()
         self_id = data.get("self_id")
+        message_id = data.get("message_id")
 
         # 1. 预处理消息：移除艾特、前后空格、并转小写用于匹配
         clean_msg = re.sub(rf"\[CQ:at,qq={self_id}(,name=[^\]]+)?\]", "", raw_msg).strip()
@@ -292,7 +314,7 @@ class BotWorker:
                 val = m_add_black.group(1).strip()
                 qq_match = re.search(r"(\d+)", val)
                 if not qq_match:
-                    await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456")
+                    await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：加黑 [QQ号]\n例如：加黑 123456", cmd_type="admin")
                     return
                 target_qq = qq_match.group(1)
             elif m_del_black:
@@ -300,7 +322,7 @@ class BotWorker:
                 val = m_del_black.group(1).strip()
                 qq_match = re.search(r"(\d+)", val)
                 if not qq_match:
-                    await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456")
+                    await self.send_group_msg(websocket, group_id, "❌ 格式错误！\n正确格式：删黑 [QQ号]\n例如：删黑 123456", cmd_type="admin")
                     return
                 target_qq = qq_match.group(1)
             elif any(re.search(x, clean_msg, re.I) for x in ["黑名单QQ", "黑名单列表", "查看黑名单"]):
@@ -322,22 +344,22 @@ class BotWorker:
                 parts = params_str.split()
                 
                 if len(parts) != 2:
-                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增CDK [数量] [价格]\n例如：新增CDK 10 50")
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：参数不齐！\n正确格式：新增CDK [数量] [价格]\n例如：新增CDK 10 50", cmd_type="admin")
                     return
 
                 try:
                     qty = int(parts[0])
                     price = int(parts[1])
                 except ValueError:
-                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：数量和价格必须为整数！")
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：数量和价格 must be 整数！", cmd_type="admin")
                     return
 
                 if qty < 1 or qty > 100:
-                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：单次新增数量范围为 1-100！")
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：单次新增数量范围为 1-100！", cmd_type="admin")
                     return
                 
                 if price < 0:
-                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：价格不能为负数！")
+                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：价格不能为负数！", cmd_type="admin")
                     return
 
                 cmd_params['qty'] = qty
@@ -402,7 +424,7 @@ class BotWorker:
                 config = self.load_decoder_config()
                 versions = config.get("versions", {})
                 if not versions:
-                    await self.send_group_msg(websocket, group_id, "⚠️ 解码器已开启，但未找到有效的版本配置(auth_config.json)。")
+                    await self.send_group_msg(websocket, group_id, "⚠️ 解码器已开启，但未找到有效的版本配置(auth_config.json)。", cmd_type="decoder")
                 else:
                     v_list_str = "、".join(versions.keys())
                     reply = (
@@ -413,7 +435,7 @@ class BotWorker:
                         f"机器识别码：XXXXXXXX 解码版本：XXX\n"
                         f"例如：机器识别码：123456ABCDEF 黑不溜秋"
                     )
-                    await self.send_group_msg(websocket, group_id, reply)
+                    await self.send_group_msg(websocket, group_id, reply, cmd_type="decoder")
                 return
 
             # 2. 匹配解码请求 (机器识别码/机器码)
@@ -445,7 +467,7 @@ class BotWorker:
                         )
                         await self.send_private_msg(websocket, user_id, result_msg)
                         # 群内反馈
-                        await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 授权码已通过【私聊】发送，请注意查收。")
+                        await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 授权码已通过【私聊】发送，请注意查收。", cmd_type="decoder")
                         self.log_func(f"✅ 解码成功: {user_id} | 版本: {matched_version}")
                     return
         # --- [解码器结束] ---
@@ -468,7 +490,7 @@ class BotWorker:
                     # 1. 校验区服
                     if zone_name not in zones:
                         fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：【{zone_name}】不在开区名单内！\n\n{zones_list_txt}"
-                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        await self.send_group_msg(websocket, group_id, fail_msg, cmd_type="group_bind")
                         return
 
                     # 2. 校验账号占用和个人上限
@@ -478,17 +500,19 @@ class BotWorker:
                         try:
                             p = r.split('|')
                             if p[0] == f"{account}:{zone_name}": account_registered = True
-                            if p[1] == str(user_id): my_binds += 1
+                            # 仅统计当前区的绑定数量
+                            if p[1] == str(user_id) and p[0].rsplit(':', 1)[-1] == zone_name:
+                                my_binds += 1
                         except: continue
 
                     if account_registered:
                         fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：账号【{account}】在【{zone_name}】已被占用！\n\n{zones_list_txt}"
-                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        await self.send_group_msg(websocket, group_id, fail_msg, cmd_type="group_bind")
                         return
 
                     if my_binds >= self.max_binds:
                         fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：您在此区的名额已满({self.max_binds}个)！\n\n{zones_list_txt}"
-                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        await self.send_group_msg(websocket, group_id, fail_msg, cmd_type="group_bind")
                         return
 
                     # 3. 写入记录
@@ -496,11 +520,11 @@ class BotWorker:
                     records.append(new_record)
                     if write_file_data(filepath, zones, records):
                         success_msg = f"[CQ:at,qq={user_id}] 🎉 绑定成功！\n区服：{zone_name}\n账号：{account}\n祝您游戏愉快！"
-                        await self.send_group_msg(websocket, group_id, success_msg)
+                        await self.send_group_msg(websocket, group_id, success_msg, cmd_type="group_bind")
                         self.log_func(f"✅ 群内绑定成功: {new_record}")
                     else:
                         fail_msg = f"[CQ:at,qq={user_id}] ❌ 绑定失败：系统无法写入记录，请联系管理（可能由昵称特殊字符引起）。"
-                        await self.send_group_msg(websocket, group_id, fail_msg)
+                        await self.send_group_msg(websocket, group_id, fail_msg, cmd_type="group_bind")
                         self.log_func(f"❌ 群内绑定失败: {new_record}")
                     return
         # --- [群内绑定结束] ---
@@ -577,7 +601,7 @@ class BotWorker:
                     "加黑 QQ (拉黑)\n"
                     "删黑 QQ (移出)"
                 )
-            await self.send_group_msg(websocket, group_id, reply)
+            await self.send_group_msg(websocket, group_id, reply, cmd_type="menu")
 
         elif cmd_type == "list_zones":
             if not self.enable_group_bind: return
@@ -587,7 +611,7 @@ class BotWorker:
             filepath = self.get_filepath()
             zones, records = read_file_data(filepath)
             reply = f"[CQ:at,qq={user_id}] \n" + self.get_zones_msg(zones, records)
-            await self.send_group_msg(websocket, group_id, reply)
+            await self.send_group_msg(websocket, group_id, reply, cmd_type="list_zones")
 
         elif cmd_type == "list_my_accounts":
             if not self.enable_group_bind: return
@@ -602,13 +626,14 @@ class BotWorker:
                     parts = r.split('|')
                     if len(parts) >= 2 and parts[1] == str(user_id):
                         acc_zone = parts[0]
-                        acc, zone = acc_zone.split(':')
+                        # 使用 rsplit 适配账号含冒号的情况
+                        acc, zone = acc_zone.rsplit(':', 1)
                         found.append(f"账号：{acc} ({zone})")
                 except: pass
             
             content = "\n".join(found) if found else "未查询到记录"
             reply = f"[CQ:at,qq={user_id}] \n【👤 您名下已绑定账号】\n{content}"
-            await self.send_group_msg(websocket, group_id, reply)
+            await self.send_group_msg(websocket, group_id, reply, cmd_type="list_my_accounts")
 
         elif cmd_type == "list_my_cdk":
             my_cdks = list(self.table_cdk.find(group_id=group_id, buyer=user_id))
@@ -624,7 +649,7 @@ class BotWorker:
             
             full_msg = "\n".join(lines)
             await self.send_private_msg(websocket, user_id, full_msg)
-            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_cdks)} 条 CDK 记录私聊发送给您。")
+            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_cdks)} 条 CDK 记录私聊发送给您。", cmd_type="list_my_cdk")
 
         elif cmd_type == "add_cdk":
             import random
@@ -665,7 +690,7 @@ class BotWorker:
                     self.log_func(f"❌ 数据库写入失败: {e}")
 
             await self.send_group_msg(websocket, group_id, 
-                f"✅ CDK 生成成功！\n群号：{group_id}\n新增数量：{success_count}\n单价：{price} 积分\n时间：{now_str}")
+                f"✅ CDK 生成成功！\n群号：{group_id}\n新增数量：{success_count}\n单价：{price} 积分\n时间：{now_str}", cmd_type="admin")
 
         elif any(clean_msg == x for x in ["查询所有CDK", "查询所有卡密", "查询所有密钥"]):
             if not is_owner:
@@ -718,13 +743,13 @@ class BotWorker:
             brief_msg = "\n".join(lines_brief)
             await self.send_private_msg(websocket, user_id, brief_msg)
             
-            await self.send_group_msg(websocket, group_id, f"✅ 已将本群 CDK 的【详情列表】与【简洁报表】私聊发送给群主。")
+            await self.send_group_msg(websocket, group_id, f"✅ 已将本群 CDK 的【详情列表】与【简洁报表】私聊发送给群主。", cmd_type="admin")
 
         elif re.match(r"^购买(?:CDK|卡密|密钥)(?:\s+(\d+))?$", clean_msg):
             # 获取本群所有未使用的CDK价格
             available_cdks = list(self.table_cdk.find(group_id=group_id, is_used=0))
             if not available_cdks:
-                await self.send_group_msg(websocket, group_id, "❌ 购买失败：当前仓库内暂无可用 CDK。")
+                await self.send_group_msg(websocket, group_id, "❌ 购买失败：当前仓库内暂无可用 CDK。", cmd_type="buy_cdk")
                 return
 
             distinct_prices = sorted(list(set([s['price'] for s in available_cdks])))
@@ -746,14 +771,14 @@ class BotWorker:
             # 校验该价格是否有库存
             cdk_record = self.table_cdk.find_one(group_id=group_id, price=target_price, is_used=0)
             if not cdk_record:
-                await self.send_group_msg(websocket, group_id, f"❌ 购买失败：价格为 {target_price} 的 CDK 已售罄。")
+                await self.send_group_msg(websocket, group_id, f"❌ 购买失败：价格为 {target_price} 的 CDK 已售罄。", cmd_type="buy_cdk")
                 return
             
             # 校验积分
             user_record = self.table_group.find_one(group_id=group_id, user_id=user_id)
             if not user_record or user_record['points'] < target_price:
                 current_pts = user_record['points'] if user_record else 0
-                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] ❌ 积分不足！购买需 {target_price} 积分，你当前仅有 {current_pts} 积分。")
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] ❌ 积分不足！购买需 {target_price} 积分，你当前仅有 {current_pts} 积分。", cmd_type="buy_cdk")
                 return
             
             # 执行购买
@@ -780,12 +805,12 @@ class BotWorker:
             await self.send_private_msg(websocket, user_id, private_msg)
             
             # 群内提示
-            await self.send_group_msg(websocket, group_id, f"🎉 [CQ:at,qq={user_id}] 购买成功！\n消耗积分：{target_price}\nCDK已通过【私聊】发送，请注意查收。")
+            await self.send_group_msg(websocket, group_id, f"🎉 [CQ:at,qq={user_id}] 购买成功！\n消耗积分：{target_price}\nCDK已通过【私聊】发送，请注意查收。", cmd_type="buy_cdk")
 
         elif cmd_type == "clear_cdk":
             try:
                 self.table_cdk.delete(group_id=group_id)
-                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 CDK 记录。")
+                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 CDK 记录。", cmd_type="admin")
                 self.log_func(f"✅ CDK清空: 群 {group_id}")
             except Exception as e:
                 await self.send_group_msg(websocket, group_id, f"❌ 清空失败：数据库操作异常。\n错误信息：{str(e)}")
@@ -797,44 +822,44 @@ class BotWorker:
             record = self.table_group.find_one(group_id=group_id, user_id=user_id)
             if not record:
                 self.table_group.insert(dict(group_id=group_id, user_nickname=nickname, user_id=user_id, points=1, last_checkin_date=today))
-                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 签到成功，积分+1")
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 签到成功，积分+1", cmd_type="checkin")
             elif record['last_checkin_date'] == today:
-                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 签到失败，今天已经签到过了~")
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 签到失败，今天已经签到过了~", cmd_type="checkin")
             else:
                 self.table_group.update(dict(id=record['id'], points=record['points'] + 1, last_checkin_date=today, user_nickname=nickname), ['id'])
-                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 签到成功，积分+1")
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 签到成功，积分+1", cmd_type="checkin")
                 
         elif cmd_type == "points":
             if not self.enable_checkin: return
             record = self.table_group.find_one(group_id=group_id, user_id=user_id)
             if not record:
-                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 没有你的记录")
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 没有你的记录", cmd_type="points")
             else:
                 pts = record['points']
-                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 你拥有积分是:{pts}，签到时间为：{record['last_checkin_date']}")
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] 你拥有积分是:{pts}，签到时间为：{record['last_checkin_date']}", cmd_type="points")
 
         elif cmd_type == "list_black":
             bl_records = list(self.table_blacklist.find(group_id=group_id))
             if not bl_records:
-                await self.send_group_msg(websocket, group_id, "当前群的黑名单为空。")
+                await self.send_group_msg(websocket, group_id, "当前群的黑名单为空。", cmd_type="admin")
             else:
                 bl_qqs = [str(x['user_id']) for x in bl_records]
-                await self.send_group_msg(websocket, group_id, f"当前群黑名单包含QQ: {', '.join(bl_qqs)}")
+                await self.send_group_msg(websocket, group_id, f"当前群黑名单包含QQ: {', '.join(bl_qqs)}", cmd_type="admin")
 
         elif cmd_type == "add_black" and target_qq:
             if not self.table_blacklist.find_one(group_id=group_id, user_id=target_qq):
                 self.table_blacklist.insert(dict(group_id=group_id, user_id=target_qq))
-                await self.send_group_msg(websocket, group_id, f"已将QQ {target_qq} 成功加入黑名单。")
+                await self.send_group_msg(websocket, group_id, f"已将QQ {target_qq} 成功加入黑名单。", cmd_type="admin")
                 self.log_func(f"✅ 加入黑名单: {target_qq}")
                 
                 if self.enable_patrol:
                     await self.call_api(websocket, "set_group_kick", {"group_id": group_id, "user_id": int(target_qq), "reject_add_request": False})
             else:
-                await self.send_group_msg(websocket, group_id, f"QQ {target_qq} 已经在黑名单列表中了。")
+                await self.send_group_msg(websocket, group_id, f"QQ {target_qq} 已经在黑名单列表中了。", cmd_type="admin")
 
         elif cmd_type == "del_black" and target_qq:
             self.table_blacklist.delete(group_id=group_id, user_id=target_qq)
-            await self.send_group_msg(websocket, group_id, f"已将QQ {target_qq} 移出黑名单。")
+            await self.send_group_msg(websocket, group_id, f"已将QQ {target_qq} 移出黑名单。", cmd_type="admin")
             self.log_func(f"✅ 移出黑名单: {target_qq}")
 
 
