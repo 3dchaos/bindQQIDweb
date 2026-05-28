@@ -1,0 +1,32 @@
+[@刷新BUFF]
+{
+#if
+#act
+;基础暴率
+MOV N$真实爆率 100
+MOV S$爆率文本 基础爆率：100%\
+
+;老登活动
+MUL N$真实爆率 2
+INC S$爆率文本 老登活动爆率*2\
+
+;CDK叠加
+MUL N$CDK叠加 U10 50
+INC N$真实爆率 <$STR(N$CDK叠加)>
+INC S$爆率文本 群CDK爆率+<$STR(N$CDK叠加)>%（CDK数量：<$STR(U10)>*50%）\
+
+
+;实现部分
+KILLMONBURSTRATE <$STR(N$真实爆率)> 0 1
+
+
+[@计算过程]
+
+#IF
+#SAY
+爆率计算过程:\
+<$STR(S$爆率文本)>\
+总计:<$KILLMONBURSTRATE>\ \
+
+<返回/@老登帮助>
+}

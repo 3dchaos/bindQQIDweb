@@ -15,6 +15,8 @@ class BotWorker:
     def __init__(self, ws_url, max_binds, log_func, get_filepath_func):
         self.ws_url = ws_url
         self.max_binds = max_binds
+        self.max_cdk_binds = 5 # 新增：默认CDK上限
+        self.max_group_cdk = 100 # 新增：默认群CDK容量
         self.log_func = log_func
         self.get_filepath = get_filepath_func
         
@@ -33,6 +35,14 @@ class BotWorker:
         self.recall_cmds = [] # 新增：需要撤回的指令列表
         self.running = False
         self.loop = None
+        
+        # 游戏文本同步路径 (根据目录结构定位)
+        if getattr(sys, 'frozen', False):
+            self.base_dir = os.path.dirname(sys.executable)
+        else:
+            self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.game_unused_file = os.path.join(self.base_dir, "Mir2Text", "老登功能", "未使用CDK.txt")
+        self.game_used_log_file = os.path.join(self.base_dir, "Mir2Text", "老登功能", "已使用.txt")
         
         # API 异步请求字典
         self.pending_requests = {}
@@ -178,8 +188,9 @@ class BotWorker:
 
             lines = [f"【👤 您名下已购 CDK 列表】", "━━━━━━━━━━━━━━"]
             for s in my_cdks:
-                status = "🔴 已售出/已使用" if s['is_used'] else "🟢 未使用"
-                lines.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}\n🏰 所属群号: {s['group_id']}")
+                status = "🔴 已售出" if s['is_used'] else "🟢 未售出"
+                redeem_status = "✅ 游戏内已兑换" if s.get('is_redeemed') else "❌ 游戏内未兑换"
+                lines.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status} | {redeem_status}\n🏰 所属群号: {s['group_id']}")
                 lines.append("--------------")
             
             full_msg = "\n".join(lines)
@@ -354,8 +365,8 @@ class BotWorker:
                     await self.send_group_msg(websocket, group_id, "❌ 新增失败：数量和价格 must be 整数！", cmd_type="admin")
                     return
 
-                if qty < 1 or qty > 100:
-                    await self.send_group_msg(websocket, group_id, "❌ 新增失败：单次新增数量范围为 1-100！", cmd_type="admin")
+                if qty < 1 or qty > self.max_group_cdk:
+                    await self.send_group_msg(websocket, group_id, f"❌ 新增失败：单次新增数量范围为 1-{self.max_group_cdk}！", cmd_type="admin")
                     return
                 
                 if price < 0:
@@ -372,6 +383,8 @@ class BotWorker:
                 cmd_params['price_input'] = m.group(1)
             elif any(re.search(x, clean_msg, re.I) for x in ["删除所有CDK", "清空CDK", "删除所有卡密", "清空卡密", "删除所有密钥", "清空密钥"]):
                 cmd_type = "clear_cdk"
+            elif any(re.search(x, clean_msg, re.I) for x in ["清空所有积分", "清空本群积分", "重置所有积分", "清空积分"]):
+                cmd_type = "clear_points"
             elif any(re.search(x, clean_msg, re.I) for x in ["查询名下CDK", "我的CDK", "我的cdk", "查询cdk", "查cdk", "查询名下卡密", "我的卡密", "查询卡密", "查卡密", "查询名下密钥", "我的密钥", "查询密钥", "查密钥"]):
                 cmd_type = "list_my_cdk"
 
@@ -582,6 +595,7 @@ class BotWorker:
                     "查询所有CDK (仅限群主)\n"
                     "新增CDK 数量 价格 (仅限群主)\n"
                     "删除所有CDK (仅限群主)\n"
+                    "清空所有积分 (仅限群主)\n"
                     "黑名单QQ (查看列表)\n"
                     "加黑 QQ (拉黑)\n"
                     "删黑 QQ (移出)"
@@ -597,6 +611,7 @@ class BotWorker:
                     "查询所有CDK (仅限群主)\n"
                     "新增CDK 数量 价格 (仅限群主)\n"
                     "删除所有CDK (仅限群主)\n"
+                    "清空所有积分 (仅限群主)\n"
                     "黑名单QQ (查看列表)\n"
                     "加黑 QQ (拉黑)\n"
                     "删黑 QQ (移出)"
@@ -643,13 +658,13 @@ class BotWorker:
 
             lines = [f"【👤 您名下已购 CDK 列表】", "━━━━━━━━━━━━━━"]
             for s in my_cdks:
-                status = "🔴 已售出/已使用" if s['is_used'] else "🟢 未使用"
-                lines.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 状态: {status}")
+                redeem_status = "✅ 游戏内已兑换" if s.get('is_redeemed') else "❌ 游戏内未兑换"
+                lines.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']}\n📅 购买时间: {s['buy_time'] or '未知'}\n📊 兑换状态: {redeem_status}")
                 lines.append("--------------")
             
             full_msg = "\n".join(lines)
             await self.send_private_msg(websocket, user_id, full_msg)
-            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_cdks)} 条 CDK 记录私聊发送给您。", cmd_type="list_my_cdk")
+            await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_cdks)} 条 CDK 记录及游戏兑换状态私聊发送给您。", cmd_type="list_my_cdk")
 
         elif cmd_type == "add_cdk":
             import random
@@ -660,10 +675,10 @@ class BotWorker:
             
             # 检查当前数据库总量
             current_total = self.table_cdk.count(group_id=group_id)
-            if current_total + qty > 100:
-                available = 100 - current_total
+            if current_total + qty > self.max_group_cdk:
+                available = self.max_group_cdk - current_total
                 await self.send_group_msg(websocket, group_id, 
-                    f"❌ 新增失败：本群 CDK 总容量上限为 100 条。\n"
+                    f"❌ 新增失败：本群 CDK 总容量上限为 {self.max_group_cdk} 条。\n"
                     f"当前已存在：{current_total} 条\n"
                     f"本次尝试新增：{qty} 条\n"
                     f"剩余空间：{max(0, available)} 条\n"
@@ -680,6 +695,7 @@ class BotWorker:
                         group_id=group_id,
                         cdk=random_cdk,
                         is_used=0,
+                        is_redeemed=0, # 新增：是否在游戏内已兑换 (0:未兑换, 1:已兑换)
                         price=price,
                         buyer=None,
                         create_time=now_str,
@@ -705,39 +721,37 @@ class BotWorker:
             # --- 1. 生成详情版消息 ---
             lines_detail = [f"【📋 群 {group_id} CDK 详情全量列表】", "━━━━━━━━━━━━━━"]
             for s in all_cdks:
-                status = "🔴 已使用" if s['is_used'] else "🟢 未使用"
+                status = "🔴 已售出" if s['is_used'] else "🟢 未售出"
+                redeem_status = "✅ 已兑换" if s.get('is_redeemed') else "❌ 未兑换"
                 buyer_info = f" | 购买人: {s['buyer']}" if s['buyer'] else ""
-                lines_detail.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']} | 状态: {status}{buyer_info}")
+                lines_detail.append(f"🔑 CDK: {s['cdk']}\n💰 价格: {s['price']} | 状态: {status} | 游戏: {redeem_status}{buyer_info}")
                 lines_detail.append("--------------")
             
             detail_msg = "\n".join(lines_detail)
             await self.send_private_msg(websocket, user_id, detail_msg)
 
             # --- 2. 生成简洁版消息 ---
-            data_map = {} # { price: { "used": [], "unused": [] } }
+            data_map = {} # { price: { "used": [], "unused": [], "redeemed_count": 0 } }
             for s in all_cdks:
                 p = s['price']
                 if p not in data_map:
-                    data_map[p] = {"used": [], "unused": []}
+                    data_map[p] = {"used": [], "unused": [], "redeemed_count": 0}
                 if s['is_used']:
                     data_map[p]["used"].append(s['cdk'])
                 else:
                     data_map[p]["unused"].append(s['cdk'])
+                if s.get('is_redeemed'):
+                    data_map[p]["redeemed_count"] += 1
 
             lines_brief = [f"【📋 群 {group_id} CDK 简洁分类报表】", "━━━━━━━━━━━━━━"]
             for price in sorted(data_map.keys()):
                 lines_brief.append(f"💰 价格为 {price} 积分")
                 used_list = data_map[price]["used"]
-                lines_brief.append(f"  🔴 已购买 ({len(used_list)} 条)")
-                if used_list:
-                    for cdk in used_list: lines_brief.append(f"    {cdk}")
-                else: lines_brief.append("    (无)")
+                redeemed_count = data_map[price]["redeemed_count"]
+                lines_brief.append(f"  🔴 已购买：{len(used_list)} 条 (其中游戏已兑换：{redeemed_count})")
                 
                 unused_list = data_map[price]["unused"]
-                lines_brief.append(f"  🟢 未购买 ({len(unused_list)} 条)")
-                if unused_list:
-                    for cdk in unused_list: lines_brief.append(f"    {cdk}")
-                else: lines_brief.append("    (无)")
+                lines_brief.append(f"  🟢 未购买：{len(unused_list)} 条")
                 lines_brief.append("--------------")
             
             brief_msg = "\n".join(lines_brief)
@@ -774,6 +788,12 @@ class BotWorker:
                 await self.send_group_msg(websocket, group_id, f"❌ 购买失败：价格为 {target_price} 的 CDK 已售罄。", cmd_type="buy_cdk")
                 return
             
+            # 校验名下购买上限
+            my_cdks_count = self.table_cdk.count(group_id=group_id, buyer=user_id)
+            if my_cdks_count >= self.max_cdk_binds:
+                await self.send_group_msg(websocket, group_id, f"[CQ:at,qq={user_id}] ❌ 购买失败：您在本群的 CDK 购买名额已满({self.max_cdk_binds}个)！", cmd_type="buy_cdk")
+                return
+
             # 校验积分
             user_record = self.table_group.find_one(group_id=group_id, user_id=user_id)
             if not user_record or user_record['points'] < target_price:
@@ -793,6 +813,16 @@ class BotWorker:
                 buy_time=now_str
             ), ['id'])
             
+            # --- [新增] 自动同步到游戏文本 ---
+            try:
+                # 确保目录存在
+                os.makedirs(os.path.dirname(self.game_unused_file), exist_ok=True)
+                with open(self.game_unused_file, "a", encoding="gbk") as f:
+                    f.write(f"{cdk_record['cdk']}\n")
+                self.log_func(f"📤 游戏同步：CDK {cdk_record['cdk']} 已写入【未使用CDK.txt】")
+            except Exception as e:
+                self.log_func(f"❌ 游戏同步失败: {e}")
+            
             # 私聊发送CDK给购买者
             private_msg = (
                 f"🎉 购买成功！\n"
@@ -810,7 +840,17 @@ class BotWorker:
         elif cmd_type == "clear_cdk":
             try:
                 self.table_cdk.delete(group_id=group_id)
-                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 CDK 记录。", cmd_type="admin")
+                
+                # --- [新增] 同步清空游戏文本 ---
+                if os.path.exists(self.game_unused_file):
+                    try:
+                        with open(self.game_unused_file, "w", encoding="gbk") as f:
+                            f.write("")
+                        self.log_func(f"📤 游戏同步：已同步清空【未使用CDK.txt】")
+                    except Exception as fe:
+                        self.log_func(f"⚠️ 游戏文本清空失败: {fe}")
+
+                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有 CDK 记录及游戏内未使用文本。", cmd_type="admin")
                 self.log_func(f"✅ CDK清空: 群 {group_id}")
             except Exception as e:
                 await self.send_group_msg(websocket, group_id, f"❌ 清空失败：数据库操作异常。\n错误信息：{str(e)}")
@@ -862,6 +902,19 @@ class BotWorker:
             await self.send_group_msg(websocket, group_id, f"已将QQ {target_qq} 移出黑名单。", cmd_type="admin")
             self.log_func(f"✅ 移出黑名单: {target_qq}")
 
+        elif cmd_type == "clear_points":
+            if not is_owner:
+                await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【群主】使用。")
+                return
+            try:
+                # 更新本群所有玩家动积分为 0
+                self.table_group.update(dict(group_id=group_id, points=0), ['group_id'])
+                await self.send_group_msg(websocket, group_id, "🧹 已成功清空本群所有玩家的积分。", cmd_type="admin")
+                self.log_func(f"✅ 积分清空: 群 {group_id}")
+            except Exception as e:
+                await self.send_group_msg(websocket, group_id, f"❌ 清空失败：数据库操作异常。\n错误信息：{str(e)}")
+                self.log_func(f"❌ 积分清空失败: {e}")
+
 
 
     async def handle_group_request(self, websocket, data):
@@ -889,6 +942,109 @@ class BotWorker:
             "approve": True
         })
 
+    async def manual_sync_text_to_db(self):
+        """手动强制同步：从日志文件更新到数据库"""
+        self.log_func("📥 正在执行强制同步：日志 -> 数据库...")
+        try:
+            if not os.path.exists(self.game_used_log_file):
+                self.log_func("❌ 同步失败：找不到已使用日志文件")
+                return
+            
+            # 复用同步逻辑
+            content = ""
+            try:
+                with open(self.game_used_log_file, "r", encoding="gbk") as f:
+                    content = f.read().strip()
+            except UnicodeDecodeError:
+                with open(self.game_used_log_file, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+
+            if not content:
+                self.log_func("💡 日志文件为空，无需同步")
+                return
+
+            lines = content.splitlines()
+            processed_count = 0
+            for line in lines:
+                match = re.search(r"使用码【(\d+)】", line)
+                if match:
+                    cdk_code = match.group(1)
+                    record = self.table_cdk.find_one(cdk=cdk_code)
+                    if record and not record.get("is_redeemed"):
+                        self.table_cdk.update(dict(id=record['id'], is_redeemed=1), ['id'])
+                        processed_count += 1
+            
+            if processed_count > 0:
+                with open(self.game_used_log_file, "w", encoding="gbk") as f:
+                    f.write("")
+                self.log_func(f"✅ 强制同步完成：共更新 {processed_count} 条记录")
+            else:
+                self.log_func("💡 未发现可更新的有效记录")
+        except Exception as e:
+            self.log_func(f"❌ 强制同步异常: {e}")
+
+    async def manual_sync_db_to_text(self):
+        """手动强制同步：将数据库中已购买但未兑换的 CDK 重新写入文件"""
+        self.log_func("📤 正在执行强制同步：数据库 -> 未使用文件...")
+        try:
+            # 查找所有 已购买(is_used=1) 且 未兑换(is_redeemed=0) 的记录
+            pending_cdks = list(self.table_cdk.find(is_used=1, is_redeemed=0))
+            
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.game_unused_file), exist_ok=True)
+            
+            # 覆盖写入文件 (即使列表为空也写入，以达到清空文件的效果)
+            with open(self.game_unused_file, "w", encoding="gbk") as f:
+                for item in pending_cdks:
+                    f.write(f"{item['cdk']}\n")
+            
+            if not pending_cdks:
+                self.log_func("✅ 强制同步完成：数据库中无待兑换记录，已清空文本文件")
+            else:
+                self.log_func(f"✅ 强制同步完成：已将 {len(pending_cdks)} 条待兑换 CDK 写入文件")
+        except Exception as e:
+            self.log_func(f"❌ 强制同步异常: {e}")
+
+    async def sync_game_records(self):
+        """后台任务：循环读取游戏的 已使用.txt 并同步到数据库"""
+        self.log_func("🔄 游戏数据同步任务已启动")
+        while self.running:
+            try:
+                if os.path.exists(self.game_used_log_file):
+                    # 以 GBK 读取 (通常游戏引擎使用 GBK)
+                    content = ""
+                    try:
+                        with open(self.game_used_log_file, "r", encoding="gbk") as f:
+                            content = f.read().strip()
+                    except UnicodeDecodeError:
+                        with open(self.game_used_log_file, "r", encoding="utf-8") as f:
+                            content = f.read().strip()
+
+                    if content:
+                        lines = content.splitlines()
+                        processed_count = 0
+                        for line in lines:
+                            # 匹配格式：...:使用码【1124717133318】
+                            match = re.search(r"使用码【(\d+)】", line)
+                            if match:
+                                cdk_code = match.group(1)
+                                # 在数据库中标记为已兑换
+                                record = self.table_cdk.find_one(cdk=cdk_code)
+                                if record and not record.get("is_redeemed"):
+                                    self.table_cdk.update(dict(id=record['id'], is_redeemed=1), ['id'])
+                                    self.log_func(f"📥 游戏同步：检测到兑换成功 | CDK: {cdk_code}")
+                                    processed_count += 1
+                        
+                        if processed_count > 0:
+                            # 清空文件，防止重复读取
+                            with open(self.game_used_log_file, "w", encoding="gbk") as f:
+                                f.write("")
+                
+            except Exception as e:
+                self.log_func(f"⚠️ 同步任务异常: {e}")
+            
+            await asyncio.sleep(1) # 每 1 秒同步一次
+
     async def start(self):
         self.running = True
         try:
@@ -901,6 +1057,9 @@ class BotWorker:
         except Exception as e:
             self.log_func(f"❌ 数据库异常: {e}")
             return
+
+        # 启动后台同步任务
+        asyncio.create_task(self.sync_game_records())
 
         self.log_func(f"正在连接: {self.ws_url}")
         try:
