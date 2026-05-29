@@ -85,6 +85,8 @@ class App:
         mid_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         # 栅格布局：设置区占前 4 列，日志占最后 1 列且可伸缩
+        mid_frame.columnconfigure(2, weight=1)
+        mid_frame.columnconfigure(3, weight=1)
         mid_frame.columnconfigure(4, weight=1)
         mid_frame.rowconfigure(0, weight=1)
 
@@ -226,7 +228,7 @@ class App:
         # --- 第五列：运行日志 (占用剩余所有空间) ---
         log_frame = ttk.LabelFrame(mid_frame, text="运行日志")
         log_frame.grid(row=0, column=4, sticky="nsew", padx=5, pady=5)
-        self.txt_log = scrolledtext.ScrolledText(log_frame, state="disabled", font=("Consolas", 9))
+        self.txt_log = scrolledtext.ScrolledText(log_frame, state="disabled", width=40, font=("Consolas", 9))
         self.txt_log.pack(fill="both", expand=True, padx=5, pady=5)
 
     def load_config_from_db(self):

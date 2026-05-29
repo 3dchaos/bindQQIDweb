@@ -387,6 +387,10 @@ class BotWorker:
                 cmd_type = "clear_points"
             elif any(re.search(x, clean_msg, re.I) for x in ["查询名下CDK", "我的CDK", "我的cdk", "查询cdk", "查cdk", "查询名下卡密", "我的卡密", "查询卡密", "查卡密", "查询名下密钥", "我的密钥", "查询密钥", "查密钥"]):
                 cmd_type = "list_my_cdk"
+            elif re.match(r"^/?反查\s*(\S+)$", clean_msg, re.I):
+                cmd_type = "reverse_lookup"
+                m = re.match(r"^/?反查\s*(\S+)$", clean_msg, re.I)
+                cmd_params['account'] = m.group(1).strip()
 
         # --- [独立匹配] 注册与查询类指令 (自然语言兼容) ---
         if self.enable_group_bind:
@@ -914,6 +918,37 @@ class BotWorker:
             except Exception as e:
                 await self.send_group_msg(websocket, group_id, f"❌ 清空失败：数据库操作异常。\n错误信息：{str(e)}")
                 self.log_func(f"❌ 积分清空失败: {e}")
+
+        elif cmd_type == "reverse_lookup":
+            if not is_owner:
+                await self.send_group_msg(websocket, group_id, f"🚫 [CQ:at,qq={user_id}] 权限不足！该指令仅限【群主】使用。")
+                return
+            
+            account_to_find = cmd_params['account']
+            filepath = self.get_filepath()
+            zones, records = read_file_data(filepath)
+            
+            found_qqs = []
+            for r in records:
+                try:
+                    parts = r.split('|')
+                    if len(parts) >= 2:
+                        acc_zone = parts[0]
+                        # 格式是 账号:区服
+                        acc = acc_zone.rsplit(':', 1)[0]
+                        if acc.lower() == account_to_find.lower():
+                            found_qqs.append(parts[1])
+                except:
+                    continue
+            
+            if not found_qqs:
+                await self.send_group_msg(websocket, group_id, f"❌ 反查失败：未找到游戏账号为【{account_to_find}】的注册记录。", cmd_type="admin")
+                return
+            
+            unique_qqs = list(set(found_qqs))
+            at_msg = " ".join([f"[CQ:at,qq={qq}]" for qq in unique_qqs])
+            reply = f"🔍 账号【{account_to_find}】的反查结果：\n共找到 {len(unique_qqs)} 个绑定的QQ号：\n{at_msg}"
+            await self.send_group_msg(websocket, group_id, reply, cmd_type="admin")
 
 
 

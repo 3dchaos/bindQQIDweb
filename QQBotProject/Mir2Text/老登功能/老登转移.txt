@@ -1,4 +1,7 @@
 [@新转移]
 {
-
+#IF
+#ACT
+MESSAGEBOX 暂时没有
+BREAK
 }

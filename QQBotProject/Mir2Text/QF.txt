@@ -8,7 +8,8 @@ GOTO @老登帮助
 [@老登帮助]
 #IF
 #SAY
-<Text:杀怪爆率：<$KILLMONBURSTRATE>;经验倍率：<$KILLMONEXPRATE>|点击查看计算过程:0:0{FCOLOR=250;FSIZE=10;FNAME=黑体}/@BUFF详情>\ \
+;<Text:杀怪爆率：<$KILLMONBURSTRATE>;经验倍率：<$KILLMONEXPRATE>|点击查看计算过程:0:0{FCOLOR=250;FSIZE=10;FNAME=黑体}/@BUFF详情>\ \
+<BUFF加成/@BUFF详情>\ \
 <怪物爆率查询/@怪物爆率查询>    <无限仓库/@无限仓库>\
 <极品装备转移/@极品装备转移>    <探测功能/@探测功能>\
 <邮箱功能/@邮箱功能>\ \
@@ -30,6 +31,36 @@ MOV *返回地图X=U0* <$X>
 MOV *返回地图Y=U1* <$Y>
 MAP SR001
 SENDMSG 6 已记录当前位置
+
+[@老登一键贱卖背包延迟]
+#ACT
+GetBagInfo ItemCount N$背包数量
+GetBagInfo ItemName L$背包物品
+MOV N$折扣 50
+MOV N$出售价 0
+Mov N1 0
+
+#IF
+LARGE N$背包数量 1
+#ACT
+WHILE N1 < <$STR(N$背包数量)>
+MOV S$道具名 <$str(L$背包物品[<$str(N1)>])>
+GetDBItemFieldValue <$str(S$道具名)> price <$STR(N2)>
+take S$道具名
+CalcPercent <$STR(N2)> <$STR(N$折扣)> N3
+INC N1 1
+INC N$出售价 <$STR(N3)>
+ENDWHILE
+
+#IF
+LARGE N$背包数量 1
+LARGE N$出售价 1
+#ACT
+MOV L$背包物品
+MOV N$背包数量
+
+give 金币 <$STR(N$出售价)>
+SENDMSG 6 清空你的背包<$STR(N$背包数量)>个道具，折扣价<$STR(N$折扣)>%，一共<$STR(N$出售价)>金币！
 
 [@怪物爆率查询]
 #ACT
