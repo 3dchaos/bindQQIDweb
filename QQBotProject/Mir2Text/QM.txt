@@ -14,6 +14,7 @@ GetStringPosEX *认证账号路径=..\..\..\..\问剑通区\老登认证账号2.txt* <$USERID>:<
 #ACT
 TextSplit | <$STR(S1)> s10
 SetranKlevelName %s\※老登群服-<$SERVERNAME>※\绑定QQ号:<$STR(s11)>
+#CALL [\老登功能\老登BUFF.txt] @刷新BUFF
 BREAK
 
 #ELSESAY
@@ -70,7 +71,7 @@ CreateNPC 老登 SR001 8 8 11 老登 1
 #ACT
 SetMirrorMapTime SR001 9999999 1
 sendmsg 7 点击【帮助】按钮，可以进入老登群服安全屋
-SetOnTimer *指定定时器=117* 10
+SetOnTimer *指定定时器=117* 1
 #CALL [\老登功能\老登BUFF.txt] @刷新BUFF
 sendmsg 7 老登群服福利，暴率翻倍
 
