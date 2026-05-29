@@ -12,7 +12,7 @@ MOV S$宝宝1 空位
 MOV S$宝宝2 空位
 MOV S$宝宝3 空位
 MOV S$宝宝4 空位
-MOV L$存宝 <$STR(T1)>
+MOV L$存宝 <$STR(*存储宝宝库=T1*)>
 GetListVarCount L$存宝 N$宝宝数
 mov N$宝宝计次 0
 While N$宝宝计次 < N$宝宝数
@@ -57,7 +57,7 @@ BREAK
 	SMALL N$存宝数量 <$STR(N$诱惑数量)>
 #SAY
 	请输入你要存储的仆从名称：\
-	<INPUTTEXT:3:10:10:240:24:193:230:246:0:30:输入不正确:请输入要存储的仆从名称:159> \ \
+	<INPUTTEXT:*存储宝宝框=3*:10:10:240:24:193:230:246:0:30:输入不正确:请输入要存储的仆从名称:159> \ \
 	<text:确定:10:6:3/@提交宝宝名(<$SCRIPTPARAM2>)>
 #ELSEACT
 	MESSAGEBOX 你目前的诱惑之光等级只允许存储<$STR(N$诱惑数量)>个仆从\目前你已经存储了：<$STR(N$存宝数量)>个仆从
@@ -82,7 +82,7 @@ CHECKSLAVENAME <$NPCINPUT(3)>
 	GAMEGOLD - 20
 	KillCallMob <$NPCINPUT(3)> 1 1
 	INC L$存宝 <$NPCINPUT(3)>
-	MOV T1 <$STR(L$存宝)>
+	MOV *存储宝宝库* <$STR(L$存宝)>
 	SENDMSG 5 提示:你的仆从<$NPCINPUT(3)>已存入本系统
 	GOTO @存储仆从1
 #ELSEACT
@@ -117,7 +117,7 @@ CHECKSLAVECOUNT > <$STR(N$取出数量)>
 #ELSEACT
 	RECALLMOB <$SCRIPTPARAM1> 1 9999 0 0 5 1
 	Dec L$存宝 <$SCRIPTPARAM1>
-	MOV T1 <$STR(L$存宝)>
+	MOV *存储宝宝库* <$STR(L$存宝)>
 	MESSAGEBOX 你的仆从：【<$SCRIPTPARAM1>】已成功召回。
 	GOTO @存储仆从1
 }

@@ -1,23 +1,23 @@
 ;=======================================老登群服专用QMange开始=======================================
-[@OnTimer117]
+[@OnTimer*指定定时器=117*]
 
 ;刷新NPC
 #IF
-EQUAL G10 1
+EQUAL *刷新NPC=G10* 1
 #ACT
 Delnpc 老登 SR001
 CreateNPC 老登 SR001 8 8 11 老登 1
-MOV G10 0
+MOV *刷新NPC=G10* 0
 
 #IF
-GetStringPosEX ..\..\..\..\问剑通区\老登认证账号2.txt <$USERID>:<$SERVERNAME> N$认证行 S1
+GetStringPosEX *认证账号路径=..\..\..\..\问剑通区\老登认证账号2.txt* <$USERID>:<$SERVERNAME> N$认证行 S1
 #ACT
 TextSplit | <$STR(S1)> s10
 SetranKlevelName %s\※老登群服-<$SERVERNAME>※\绑定QQ号:<$STR(s11)>
 BREAK
 
 #ELSESAY
-老登群成员检查未通过\请发送以下信息给管理注册机器人(781369990),等待验证\
+老登群成员检查未通过\请发送以下信息给管理注册机器人(*指定机器人QQ号=781369990*),等待验证\
 <复制信息/@@CopyToClipboard1(绑定 <$SERVERNAME> <$USERID>)>绑定 <$SERVERNAME> <$USERID>
 #ELSEACT
 ChangeState 1 10 
@@ -25,36 +25,36 @@ ChangeState 1 10
 #IF
 CHECKMAPNAME SR001
 #ELSEACT
-MOV T16 <$MAP>
-MOV T17 <$MapTitle>
-MOV U0 <$X>
-MOV U1 <$Y>
+MOV *返回地图=T16* <$MAP>
+MOV *返回地图名=T17* <$MapTitle>
+MOV *返回地图X=U0* <$X>
+MOV *返回地图Y=U1* <$Y>
 MAP SR001
 SENDMSG 6 已记录当前位置
 
 [@邮件送达]
 #IF
-EQUAL A689 <$USERNAME>
+EQUAL *接受邮件用户名=A689* <$USERNAME>
 #ACT
 GuildNoticeMsg 255 249 [你有新邮件送达，请点开小地图上的邮件接收吧！] Self
 
 [@新查询玩家]
 #IF
-EQUAL A690 <$USERNAME>
+EQUAL *查询角色名=A690* <$USERNAME>
 #ACT
-MOV A691 地图：<$MAP>-坐标：<$X>，<$Y>
+MOV *查询角色信息=A691* 地图：<$MAP>-坐标：<$X>，<$Y>
 GuildNoticeMsg 255 249 [你已经被人探测！] Self
 
 ;=======================================老登群服专用QMange结束=======================================
 
 
 [@Login]
-;=======================================老登Login群服注入开始=======================================
+;=======================================植入@Login=老登Login群服注入开始=======================================
 #IF
 ISNEWHUMAN
 #ACT
 ;新人初始化cdk的数量
-mov U10 0
+mov *CDK数量变量=U10* 0
 
 #IF
 EQUAL N$安全屋状态 0
@@ -70,15 +70,15 @@ CreateNPC 老登 SR001 8 8 11 老登 1
 #ACT
 SetMirrorMapTime SR001 9999999 1
 sendmsg 7 点击【帮助】按钮，可以进入老登群服安全屋
-SetOnTimer 117 10
+SetOnTimer *指定定时器=117* 10
 #CALL [\老登功能\老登BUFF.txt] @刷新BUFF
 sendmsg 7 老登群服福利，暴率翻倍
 
 ;幽灵状态
 #IF
-CHECK [99] 1
+CHECK [*幽灵状态标识=99*] 1
 #ACT
 ;清理背包
 Gmexecute 清理背包 self
-SET [99] 0
-;=======================================老登Login群服注入结束=======================================
+SET [*幽灵状态标识=99*] 0
+;=======================================植入@Login=老登Login群服注入结束=======================================

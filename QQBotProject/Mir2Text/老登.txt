@@ -161,10 +161,10 @@ take 金币 2000
 
 [@返回地图]
 #IF
-NOT EQUAL <$MAP> <$STR(T16)>
+NOT EQUAL <$MAP> <$STR(*返回地图=T16*)>
 #ACT
-MAPMOVE <$STR(T16)> <$STR(U0)> <$STR(U1)>
-SENDMSG 6 返回位置：<$STR(T17)>地图,坐标<$STR(U0)>：<$STR(U1)>
+MAPMOVE <$STR(*返回地图=T16*)> <$STR(*返回地图X=U0*)> <$STR(*返回地图Y=U1*)>
+SENDMSG 6 返回位置：<$STR(*返回地图名=T17*)>地图,坐标<$STR(*返回地图X=U0*)>：<$STR(*返回地图Y=U1*)>
 #ELSEACT
 MESSAGEBOX 无法返你的目的地！请小退返回比奇
 [@s_repair]

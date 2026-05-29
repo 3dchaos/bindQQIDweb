@@ -3,12 +3,14 @@ import sys
 import threading
 import asyncio
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
+from tkinter import ttk, filedialog, scrolledtext, messagebox
 import dataset
-import configparser
+import shutil
+import re
 from data_manager import read_file_data, write_file_data
 from bot_core import BotWorker
 from config import DB_URL, DEFAULT_WS_URL, DEFAULT_BIND_FILE
+import script_implant
 
 class App:
     def __init__(self, root):
@@ -17,136 +19,126 @@ class App:
         self.root.geometry("1100x650")
 
         self.worker = None
+        self.script_vars_entries = {} # 存储变量名和对应的 Entry
         self.setup_ui()
         self.load_config_from_db()
         self.load_data()
         self.check_implant_files() # 初始检测一次
 
     def setup_ui(self):
-        # 1. 顶部：连接设置
-        top_frame = ttk.LabelFrame(self.root, text="LLOneBot 连接设置")
-        top_frame.pack(fill="x", padx=10, pady=5)
+        # --- 顶部：分左右两半 ---
+        top_container = ttk.Frame(self.root)
+        top_container.pack(fill="x", padx=10, pady=5)
+
+        # 1. 左侧：连接设置
+        top_left = ttk.LabelFrame(top_container, text="LLOneBot 连接设置")
+        top_left.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
-        ttk.Label(top_frame, text="WS地址:").pack(side="left", padx=5)
-        self.ent_url = ttk.Entry(top_frame)
-        self.ent_url.pack(side="left", fill="x", expand=True, padx=5)
+        ttk.Label(top_left, text="WS:").pack(side="left", padx=2)
+        self.ent_url = ttk.Entry(top_left, width=30)
+        self.ent_url.pack(side="left", fill="x", expand=True, padx=2)
 
-        ttk.Label(top_frame, text="Token:").pack(side="left", padx=5)
-        self.ent_token = ttk.Entry(top_frame, width=15)
-        self.ent_token.pack(side="left", padx=5)
+        ttk.Label(top_left, text="Token:").pack(side="left", padx=2)
+        self.ent_token = ttk.Entry(top_left, width=10)
+        self.ent_token.pack(side="left", padx=2)
 
-        self.btn_start = ttk.Button(top_frame, text="启动 Bot", command=self.start_bot)
-        self.btn_start.pack(side="left", padx=5)
-        self.btn_stop = ttk.Button(top_frame, text="停止", state="disabled", command=self.stop_bot)
-        self.btn_stop.pack(side="left", padx=5)
+        self.btn_start = ttk.Button(top_left, text="启动", width=6, command=self.start_bot)
+        self.btn_start.pack(side="left", padx=2)
+        self.btn_stop = ttk.Button(top_left, text="停止", width=6, state="disabled", command=self.stop_bot)
+        self.btn_stop.pack(side="left", padx=2)
 
-        # 2. 第二行：文件路径选择
-        file_frame = ttk.LabelFrame(self.root, text="同步目录设置")
-        file_frame.pack(fill="x", padx=10, pady=5)
+        # 2. 右侧：同步目录设置
+        top_right = ttk.LabelFrame(top_container, text="同步目录设置")
+        top_right.pack(side="left", fill="both", expand=True, padx=(5, 0))
         
-        # 私聊注册目录
-        f1 = ttk.Frame(file_frame)
-        f1.pack(fill="x", pady=2)
-        ttk.Label(f1, text="私聊注册:", width=10).pack(side="left", padx=5)
+        # 使用 Grid 缩减高度
+        # 私聊注册
+        f1 = ttk.Frame(top_right)
+        f1.pack(fill="x", pady=1)
+        ttk.Label(f1, text="注册:", width=6).pack(side="left")
         self.ent_file_path = ttk.Entry(f1)
-        self.ent_file_path.pack(side="left", fill="x", expand=True, padx=5)
-        ttk.Button(f1, text="选择", width=5, command=self.browse_file).pack(side="left", padx=5)
+        self.ent_file_path.pack(side="left", fill="x", expand=True, padx=2)
+        ttk.Button(f1, text="..", width=3, command=self.browse_file).pack(side="left")
 
-        # 游戏未使用CDK文件
-        f2 = ttk.Frame(file_frame)
-        f2.pack(fill="x", pady=2)
-        ttk.Label(f2, text="未使用CDK:", width=10).pack(side="left", padx=5)
-        self.ent_unused_path = ttk.Entry(f2)
-        self.ent_unused_path.pack(side="left", fill="x", expand=True, padx=5)
-        ttk.Button(f2, text="选择", width=5, command=self.browse_unused_file).pack(side="left", padx=5)
+        # 游戏文件 (并排显示)
+        f23 = ttk.Frame(top_right)
+        f23.pack(fill="x", pady=1)
+        
+        ttk.Label(f23, text="未使用:", width=6).pack(side="left")
+        self.ent_unused_path = ttk.Entry(f23)
+        self.ent_unused_path.pack(side="left", fill="x", expand=True, padx=2)
+        ttk.Button(f23, text="..", width=3, command=self.browse_unused_file).pack(side="left")
 
-        # 游戏已使用日志文件
-        f3 = ttk.Frame(file_frame)
-        f3.pack(fill="x", pady=2)
-        ttk.Label(f3, text="已使用日志:", width=10).pack(side="left", padx=5)
-        self.ent_used_log_path = ttk.Entry(f3)
-        self.ent_used_log_path.pack(side="left", fill="x", expand=True, padx=5)
-        ttk.Button(f3, text="选择", width=5, command=self.browse_used_log_file).pack(side="left", padx=5)
+        ttk.Label(f23, text="已使用:", width=6).pack(side="left", padx=(5,0))
+        self.ent_used_log_path = ttk.Entry(f23)
+        self.ent_used_log_path.pack(side="left", fill="x", expand=True, padx=2)
+        ttk.Button(f23, text="..", width=3, command=self.browse_used_log_file).pack(side="left")
 
         # 强制同步按钮
-        sync_btn_f = ttk.Frame(file_frame)
-        sync_btn_f.pack(fill="x", pady=5)
-        ttk.Button(sync_btn_f, text="📥 强制同步：日志 -> 数据库", command=self.force_sync_text_to_db).pack(side="left", padx=10, expand=True, fill="x")
-        ttk.Button(sync_btn_f, text="📤 强制同步：数据库 -> 未使用文件", command=self.force_sync_db_to_text).pack(side="left", padx=10, expand=True, fill="x")
+        sync_btn_f = ttk.Frame(top_right)
+        sync_btn_f.pack(fill="x", pady=2)
+        ttk.Button(sync_btn_f, text="📥 日志->DB", command=self.force_sync_text_to_db).pack(side="left", padx=2, expand=True, fill="x")
+        ttk.Button(sync_btn_f, text="📤 DB->未使用", command=self.force_sync_db_to_text).pack(side="left", padx=2, expand=True, fill="x")
 
-        # 3. 中间主体 (使用 Grid 布局实现四列)
+        # --- 中间主体 (核心功能区 + 日志) ---
         mid_frame = ttk.Frame(self.root)
-        mid_frame.pack(fill="x", padx=10, pady=5)
+        mid_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # --- 第一列：核心设置 & 上限控制 ---
+        # 栅格布局：设置区占前 4 列，日志占最后 1 列且可伸缩
+        mid_frame.columnconfigure(4, weight=1)
+        mid_frame.rowconfigure(0, weight=1)
+
+        # --- 第一列：上限控制 ---
         col1 = ttk.Frame(mid_frame)
-        col1.grid(row=0, column=0, sticky="nw", padx=5)
+        col1.grid(row=0, column=0, sticky="nw", padx=2)
         
-        limit_box = ttk.LabelFrame(col1, text="注册 & CDK 上限")
+        limit_box = ttk.LabelFrame(col1, text="上限控制")
         limit_box.pack(fill="x", pady=5)
         
-        # QQ 注册上限
-        l_f1 = ttk.Frame(limit_box)
-        l_f1.pack(fill="x", padx=5, pady=2)
-        ttk.Label(l_f1, text="QQ注册上限:").pack(side="left")
-        self.spin_limit = tk.Spinbox(l_f1, from_=1, to=100, width=5)
-        self.spin_limit.pack(side="left", padx=5)
+        for text, spin_attr, val_range in [
+            ("QQ注册上限:", "spin_limit", (1, 100)),
+            ("CDK购上限:", "spin_cdk_limit", (1, 100)),
+            ("群CDK容量:", "spin_group_cdk_limit", (1, 1000))
+        ]:
+            f = ttk.Frame(limit_box)
+            f.pack(fill="x", padx=5, pady=2)
+            ttk.Label(f, text=text).pack(side="left")
+            setattr(self, spin_attr, tk.Spinbox(f, from_=val_range[0], to=val_range[1], width=5))
+            getattr(self, spin_attr).pack(side="right", padx=5)
         
-        # CDK 购买上限
-        l_f2 = ttk.Frame(limit_box)
-        l_f2.pack(fill="x", padx=5, pady=2)
-        ttk.Label(l_f2, text="CDK购上限:").pack(side="left")
-        self.spin_cdk_limit = tk.Spinbox(l_f2, from_=1, to=100, width=5)
-        self.spin_cdk_limit.pack(side="left", padx=5)
-        
-        # 群 CDK 总容量
-        l_f3 = ttk.Frame(limit_box)
-        l_f3.pack(fill="x", padx=5, pady=2)
-        ttk.Label(l_f3, text="群CDK容量:").pack(side="left")
-        self.spin_group_cdk_limit = tk.Spinbox(l_f3, from_=1, to=1000, width=5)
-        self.spin_group_cdk_limit.pack(side="left", padx=5)
-        
-        ttk.Button(limit_box, text="更新所有上限", command=self.save_all_settings).pack(fill="x", padx=5, pady=5)
-        
+        ttk.Button(limit_box, text="💾 保存所有上限", command=self.save_all_settings).pack(fill="x", padx=5, pady=5)
         ttk.Button(col1, text="🔃 刷新文本数据", command=self.load_data).pack(fill="x", pady=5)
 
-        # --- 第二列：群管理开关 ---
+        # --- 第二列：功能开关 ---
         col2 = ttk.Frame(mid_frame)
-        col2.grid(row=0, column=1, sticky="nw", padx=5)
+        col2.grid(row=0, column=1, sticky="nw", padx=2)
         
-        grp_f = ttk.LabelFrame(col2, text="群管理功能开关")
+        grp_f = ttk.LabelFrame(col2, text="群功能开关")
         grp_f.pack(fill="x", pady=5)
         
-        self.var_manage = tk.BooleanVar(value=False)
-        self.var_checkin = tk.BooleanVar(value=False)
-        self.var_patrol = tk.BooleanVar(value=False)
-        self.var_auto_join = tk.BooleanVar(value=False)
-        self.var_auto_friend = tk.BooleanVar(value=False)
-        self.var_decoder = tk.BooleanVar(value=False)
-        self.var_group_bind = tk.BooleanVar(value=False)
-        
-        ttk.Checkbutton(grp_f, text="开启群管理", variable=self.var_manage, command=self.update_bot_flags).pack(anchor="w", padx=5)
-        ttk.Checkbutton(grp_f, text="开启群签到", variable=self.var_checkin, command=self.update_bot_flags).pack(anchor="w", padx=5)
-        ttk.Checkbutton(grp_f, text="巡逻(自动踢黑)", variable=self.var_patrol, command=self.update_bot_flags).pack(anchor="w", padx=5)
-        ttk.Checkbutton(grp_f, text="自动进群", variable=self.var_auto_join, command=self.update_bot_flags).pack(anchor="w", padx=5)
-        ttk.Checkbutton(grp_f, text="自动同意好友", variable=self.var_auto_friend, command=self.update_bot_flags).pack(anchor="w", padx=5)
+        switches = [
+            ("开启群管理", "var_manage"),
+            ("开启群签到", "var_checkin"),
+            ("巡逻(自动踢黑)", "var_patrol"),
+            ("自动进群", "var_auto_join"),
+            ("自动同意好友", "var_auto_friend")
+        ]
+        for text, var_attr in switches:
+            setattr(self, var_attr, tk.BooleanVar(value=False))
+            ttk.Checkbutton(grp_f, text=text, variable=getattr(self, var_attr), command=self.update_bot_flags).pack(anchor="w", padx=5)
         
         # 解码/绑定
-        dec_f = ttk.Frame(grp_f)
-        dec_f.pack(fill="x", padx=5, pady=2)
-        ttk.Checkbutton(dec_f, text="解码", variable=self.var_decoder, command=self.update_bot_flags).pack(side="left")
-        self.ent_decoder_group = ttk.Entry(dec_f, width=10)
-        self.ent_decoder_group.pack(side="left", padx=2)
-        
-        bnd_f = ttk.Frame(grp_f)
-        bnd_f.pack(fill="x", padx=5, pady=2)
-        ttk.Checkbutton(bnd_f, text="绑定", variable=self.var_group_bind, command=self.update_bot_flags).pack(side="left")
-        self.ent_bind_group = ttk.Entry(bnd_f, width=10)
-        self.ent_bind_group.pack(side="left", padx=2)
+        for text, var_attr, ent_attr in [("解码", "var_decoder", "ent_decoder_group"), ("绑定", "var_group_bind", "ent_bind_group")]:
+            setattr(self, var_attr, tk.BooleanVar(value=False))
+            f = ttk.Frame(grp_f)
+            f.pack(fill="x", padx=5, pady=1)
+            ttk.Checkbutton(f, text=text, variable=getattr(self, var_attr), command=self.update_bot_flags).pack(side="left")
+            setattr(self, ent_attr, ttk.Entry(f, width=10))
+            getattr(self, ent_attr).pack(side="right", padx=2)
 
-        # --- 第三列：撤回设置 ---
+        # --- 第三列：撤回 & 区服 ---
         col3 = ttk.Frame(mid_frame)
-        col3.grid(row=0, column=2, sticky="nw", padx=5)
+        col3.grid(row=0, column=2, sticky="nw", padx=2)
         
         recall_f = ttk.LabelFrame(col3, text="撤回设置")
         recall_f.pack(fill="x", pady=5)
@@ -157,79 +149,84 @@ class App:
         
         rc_top = ttk.Frame(recall_f)
         rc_top.pack(fill="x", padx=5, pady=2)
-        ttk.Checkbutton(rc_top, text="自动撤回", variable=self.var_auto_recall, command=self.update_bot_flags).pack(side="left")
-        self.spin_recall_delay = tk.Spinbox(rc_top, from_=1, to=60, width=3, textvariable=self.var_recall_delay, command=self.update_bot_flags)
-        self.spin_recall_delay.pack(side="left", padx=2)
+        ttk.Checkbutton(rc_top, text="自动", variable=self.var_auto_recall, command=self.update_bot_flags).pack(side="left")
+        tk.Spinbox(rc_top, from_=1, to=60, width=3, textvariable=self.var_recall_delay, command=self.update_bot_flags).pack(side="left", padx=2)
         ttk.Label(rc_top, text="秒").pack(side="left")
 
-        # 指令选择
+        # 指令选择 (精简版)
         self.recall_cmds_frame = ttk.Frame(recall_f)
-        self.recall_cmds_frame.pack(fill="x", padx=5, pady=2)
+        self.recall_cmds_frame.pack(fill="x", padx=2)
         commands = [
             ("menu", "菜单"), ("checkin", "签到"), ("points", "积分"),
             ("buy_cdk", "购CDK"), ("list_my_cdk", "我的CDK"), ("list_zones", "区表"),
-            ("list_my_accounts", "我的号"), ("group_bind", "群绑"), ("decoder", "解码"),
-            ("admin", "管理"), ("patrol", "巡逻")
+            ("list_my_accounts", "我的号")
         ]
         for i, (cid, cname) in enumerate(commands):
             var = tk.BooleanVar(value=True)
             self.recall_cmds_vars[cid] = var
             ttk.Checkbutton(self.recall_cmds_frame, text=cname, variable=var, command=self.update_bot_flags).grid(row=i//2, column=i%2, sticky="w")
 
-        # --- 第四列：区服列表 ---
-        col4 = ttk.Frame(mid_frame)
-        col4.grid(row=0, column=3, sticky="nw", padx=5)
-        
-        zone_f = ttk.LabelFrame(col4, text="区服管理")
+        # 区服管理 (移到下面或作为第四列)
+        zone_f = ttk.LabelFrame(col3, text="区服管理")
         zone_f.pack(fill="both", expand=True, pady=5)
-        
-        self.list_zones = tk.Listbox(zone_f, width=18, height=12)
+        self.list_zones = tk.Listbox(zone_f, width=15, height=8)
         self.list_zones.pack(fill="both", expand=True, padx=5, pady=2)
-        
-        self.ent_new_zone = ttk.Entry(zone_f, width=15)
-        self.ent_new_zone.pack(fill="x", padx=5, pady=2)
-        
+        self.ent_new_zone = ttk.Entry(zone_f, width=12)
+        self.ent_new_zone.pack(fill="x", padx=5)
         btn_f = ttk.Frame(zone_f)
-        btn_f.pack(fill="x", pady=2)
-        ttk.Button(btn_f, text="添加", width=6, command=self.add_zone).pack(side="left", padx=2)
-        ttk.Button(btn_f, text="删除", width=6, command=self.del_zone).pack(side="left", padx=2)
-        ttk.Button(zone_f, text="清理失效注册", command=self.cleanup_records).pack(fill="x", padx=5, pady=2)
+        btn_f.pack(fill="x")
+        ttk.Button(btn_f, text="+", width=3, command=self.add_zone).pack(side="left", padx=5)
+        ttk.Button(btn_f, text="-", width=3, command=self.del_zone).pack(side="left")
+        ttk.Button(btn_f, text="扫", width=3, command=self.cleanup_records).pack(side="right", padx=5)
 
-        # --- 第五列：版本植入功能 ---
-        col5 = ttk.Frame(mid_frame)
-        col5.grid(row=0, column=4, sticky="nw", padx=5)
+        # --- 第四列：版本植入 ---
+        col4 = ttk.Frame(mid_frame)
+        col4.grid(row=0, column=3, sticky="nw", padx=2)
         
-        implant_f = ttk.LabelFrame(col5, text="版本植入功能")
+        implant_f = ttk.LabelFrame(col4, text="版本植入")
         implant_f.pack(fill="both", expand=True, pady=5)
         
-        # 状态列表
         self.lbl_implant_items = {}
-        items = [("QFunction", "QF.txt"), ("QManage", "QM.txt"), ("NPC", "老登.txt"), ("功能", "老登功能")]
-        for name, fname in items:
-            lbl = tk.Label(implant_f, text=name, width=15, fg="white", bg="grey")
-            lbl.pack(fill="x", padx=5, pady=2)
+        f_status = ttk.Frame(implant_f)
+        f_status.pack(fill="x")
+        for name, fname in [("QF", "QF.txt"), ("QM", "QM.txt"), ("NPC", "老登.txt"), ("功能", "老登功能")]:
+            lbl = tk.Label(f_status, text=name, width=4, fg="white", bg="grey", font=("", 8))
+            lbl.pack(side="left", padx=2, pady=1)
             self.lbl_implant_items[name] = (lbl, fname)
             
-        ttk.Button(implant_f, text="重新读取", command=self.check_implant_files).pack(fill="x", padx=5, pady=5)
+        ttk.Button(implant_f, text="刷新变量", command=self.refresh_script_variables).pack(fill="x", padx=5, pady=2)
         
-        # 目录选择
-        dir_f = ttk.Frame(implant_f)
-        dir_f.pack(fill="x", padx=5, pady=5)
-        ttk.Label(dir_f, text="版本根目录:").pack(anchor="w")
-        self.ent_version_dir = ttk.Entry(dir_f, width=18)
-        self.ent_version_dir.pack(fill="x", side="left", expand=True)
-        ttk.Button(dir_f, text="..", width=3, command=self.browse_version_dir).pack(side="left", padx=2)
+        # 变量列表容器
+        var_list_f = ttk.LabelFrame(implant_f, text="注入变量")
+        var_list_f.pack(fill="both", expand=True, padx=5, pady=2)
         
-        self.lbl_game_name = ttk.Label(implant_f, text="游戏名称: 未知", foreground="blue")
-        self.lbl_game_name.pack(anchor="w", padx=5)
+        self.canvas_vars = tk.Canvas(var_list_f, width=180)
+        self.scrollbar_vars = ttk.Scrollbar(var_list_f, orient="vertical", command=self.canvas_vars.yview)
+        self.scrollable_vars_frame = ttk.Frame(self.canvas_vars)
         
-        self.btn_write_implant = ttk.Button(implant_f, text="写入功能", state="disabled")
+        self.scrollable_vars_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas_vars.configure(scrollregion=self.canvas_vars.bbox("all"))
+        )
+        
+        self.canvas_vars.create_window((0, 0), window=self.scrollable_vars_frame, anchor="nw")
+        self.canvas_vars.configure(yscrollcommand=self.scrollbar_vars.set)
+        
+        self.canvas_vars.pack(side="left", fill="both", expand=True)
+        self.scrollbar_vars.pack(side="right", fill="y")
+        
+        self.ent_version_dir = ttk.Entry(implant_f, width=12)
+        self.ent_version_dir.pack(fill="x", padx=5, pady=2)
+        ttk.Button(implant_f, text="选择版本目录", command=self.browse_version_dir).pack(fill="x", padx=5)
+        self.lbl_game_name = ttk.Label(implant_f, text="游戏: 未知", font=("", 9), foreground="blue")
+        self.lbl_game_name.pack(padx=5)
+        self.btn_write_implant = ttk.Button(implant_f, text="写入功能", state="disabled", command=self.write_implant_function)
         self.btn_write_implant.pack(fill="x", padx=5, pady=5)
 
-        # 4. 底部：日志
-        log_frame = ttk.LabelFrame(self.root, text="运行日志")
-        log_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        self.txt_log = scrolledtext.ScrolledText(log_frame, height=10, state="disabled", font=("Consolas", 9))
+        # --- 第五列：运行日志 (占用剩余所有空间) ---
+        log_frame = ttk.LabelFrame(mid_frame, text="运行日志")
+        log_frame.grid(row=0, column=4, sticky="nsew", padx=5, pady=5)
+        self.txt_log = scrolledtext.ScrolledText(log_frame, state="disabled", font=("Consolas", 9))
         self.txt_log.pack(fill="both", expand=True, padx=5, pady=5)
 
     def load_config_from_db(self):
@@ -541,46 +538,72 @@ class App:
         if directory:
             self.ent_version_dir.delete(0, "end")
             self.ent_version_dir.insert(0, directory)
-            self.load_game_name_from_ini(directory)
+            name = script_implant.get_game_name(directory, self.log)
+            self.lbl_game_name.config(text=f"游戏名称: {name}")
+            self.btn_write_implant.config(state="normal")
             self.save_all_settings()
 
     def load_game_name_from_ini(self, directory):
-        ini_path = os.path.join(directory, "Config.ini")
-        if os.path.exists(ini_path):
-            try:
-                cp = configparser.ConfigParser()
-                # 尝试用 GBK 读取
-                try:
-                    cp.read(ini_path, encoding="gbk")
-                except:
-                    cp.read(ini_path, encoding="utf-8")
-                
-                name = cp.get("GameConf", "GameName", fallback="未知")
-                self.lbl_game_name.config(text=f"游戏名称: {name}")
-            except Exception as e:
-                self.lbl_game_name.config(text="游戏名称: 读取失败")
-                self.log(f"⚠️ 读取 Config.ini 异常: {e}")
-        else:
-            self.lbl_game_name.config(text="游戏名称: 找不到 Config.ini")
+        # 兼容旧逻辑，但现在主要由 browse_version_dir 调用 script_implant
+        name = script_implant.get_game_name(directory, self.log)
+        self.lbl_game_name.config(text=f"游戏名称: {name}")
 
     def check_implant_files(self):
         """检查 Mir2Text 目录下的文件是否存在并更新 UI 颜色"""
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            
-        mir_path = os.path.join(base_dir, "Mir2Text")
-        
-        for name, (lbl, fname) in self.lbl_implant_items.items():
-            f_path = os.path.join(mir_path, fname)
-            exists = False
-            if name == "功能": # 检查子目录
-                exists = os.path.isdir(f_path)
-            else:
-                exists = os.path.exists(f_path)
-            
+        mir_path = script_implant.get_mir_path()
+        items = [(name, fname) for name, (lbl, fname) in self.lbl_implant_items.items()]
+        results = script_implant.check_templates(mir_path, items)
+
+        all_ok = True
+        for name, exists in results.items():
+            lbl, _ = self.lbl_implant_items[name]
             if exists:
                 lbl.config(bg="green")
             else:
                 lbl.config(bg="red")
+                all_ok = False
+        return all_ok
+
+    def refresh_script_variables(self):
+        """扫描所有模板文件并提取变量显示在 UI 上 (去重处理)"""
+        self.check_implant_files()
+        mir_path = script_implant.get_mir_path()
+        unified_vars = script_implant.get_unified_variables(mir_path, self.log)
+
+        self.script_vars_entries.clear()
+        for widget in self.scrollable_vars_frame.winfo_children():
+            widget.destroy()
+
+        if not unified_vars:
+            ttk.Label(self.scrollable_vars_frame, text="未发现变量").pack()
+        else:
+            # 按名称排序，方便查找
+            for var_name in sorted(unified_vars.keys()):
+                def_val = unified_vars[var_name]
+                row = ttk.Frame(self.scrollable_vars_frame)
+                row.pack(fill="x", pady=1)
+                ttk.Label(row, text=f"{var_name}:", width=12).pack(side="left")
+                ent = ttk.Entry(row, width=10)
+                ent.insert(0, def_val)
+                ent.pack(side="right", padx=2, fill="x", expand=True)
+                self.script_vars_entries[var_name] = ent
+
+        self.log(f"系统: 已提取并去重 {len(unified_vars)} 个模板变量")
+
+    def write_implant_function(self):
+        """执行脚本注入逻辑"""
+        version_dir = self.ent_version_dir.get().strip()
+        if not version_dir or not os.path.isdir(version_dir):
+            messagebox.showerror("错误", "请先选择有效的版本目录")
+            return
+
+        if not messagebox.askyesno("确认", "此操作将修改版本脚本文件，确定要继续吗？"):
+            return
+
+        user_inputs = {name: ent.get().strip() for name, ent in self.script_vars_entries.items()}
+        mir_path = script_implant.get_mir_path()
+
+        if script_implant.implant_scripts(version_dir, mir_path, user_inputs, self.log):
+            messagebox.showinfo("完成", "版本功能植入已完成！")
+        else:
+            messagebox.showerror("错误", "注入过程中发生异常，请查看日志")

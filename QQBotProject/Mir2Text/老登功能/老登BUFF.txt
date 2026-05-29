@@ -11,9 +11,9 @@ MUL N$真实爆率 2
 INC S$爆率文本 老登活动爆率*2\
 
 ;CDK叠加
-MUL N$CDK叠加 U10 50
+MUL N$CDK叠加 *CDK数量变量* 50
 INC N$真实爆率 <$STR(N$CDK叠加)>
-INC S$爆率文本 群CDK爆率+<$STR(N$CDK叠加)>%（CDK数量：<$STR(U10)>*50%）\
+INC S$爆率文本 群CDK爆率+<$STR(N$CDK叠加)>%（CDK数量：<$STR(*CDK数量变量*)>*50%）\
 
 
 ;实现部分
