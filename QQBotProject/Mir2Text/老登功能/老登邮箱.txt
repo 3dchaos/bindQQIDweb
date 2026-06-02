@@ -351,7 +351,7 @@ INC L$道具具体数据 <$STR(S$装备临时)>
 AddTextListEx ..\QuestDiary\数据文件\邮箱\邮箱道具库\<$BOXITEM[*邮箱寄出框*].MAKEINDEX>.txt <$STR(L$道具具体数据)> 0
 DelBoxItem 1
 MOV *接受邮件用户名* <$NPCINPUT(*邮箱名字输入框)>
-Gmexecute 全服触发 @邮件送达
+Gmexecute *全服提问命令=全服触发* @邮件送达
 MESSAGEBOX 恭喜！！邮件已经发送给他了。
 }
 
