@@ -24,7 +24,10 @@ ISADMIN
 
 [@老登安全屋]
 #IF
+EQUAL <$MAP> SR001
 #ACT
+SENDMSG 6 你已经在安全屋了
+#ELSEACT
 MOV *返回地图=T16* <$MAP>
 MOV *返回地图名=T17* <$MapTitle>
 MOV *返回地图X=U0* <$X>
