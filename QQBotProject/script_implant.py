@@ -188,20 +188,20 @@ def smart_implant_to_file(dest_path, built_content, log_callback):
             m = re.match(r"(植入|覆盖)@([^=]+)=", instruction)
             if m:
                 action = m.group(1)
-                segment = m.group(2)
+                segment = m.group(2).strip()
             
             # c. 执行动作
             full_block_str = full_block.strip()
             if action == "覆盖" and segment:
-                # 覆盖模式: 替换掉 [@段名] 及其后续内容直到下一个段落
-                seg_pattern = re.compile(r'^\[@' + re.escape(segment) + r'\]\s*.*?(?=^\[@|\Z)', re.MULTILINE | re.DOTALL)
+                # 覆盖模式: 替换掉 [@段名] 及其后续内容直到下一个段落 (增强识别：支持 [ @段名 ] 等变体)
+                seg_pattern = re.compile(r'^\[\s*@\s*' + re.escape(segment) + r'\s*\]\s*.*?(?=^\[\s*@|\Z)', re.MULTILINE | re.DOTALL | re.IGNORECASE)
                 if seg_pattern.search(target_content):
                     target_content = seg_pattern.sub(full_block_str + "\n", target_content, count=1)
                 else:
                     target_content = target_content.strip() + "\n\n" + full_block_str
             elif action == "植入" and segment:
-                # 植入模式: 在 [@段名] 头部插入 (紧跟在头部行之后)
-                header_pattern = re.compile(r'^\[@' + re.escape(segment) + r'\]', re.MULTILINE)
+                # 植入模式: 在 [@段名] 头部插入 (紧跟在头部行之后) (增强识别：支持 [ @段名 ] 等变体)
+                header_pattern = re.compile(r'^\[\s*@\s*' + re.escape(segment) + r'\s*\]', re.MULTILINE | re.IGNORECASE)
                 if header_pattern.search(target_content):
                     target_content = header_pattern.sub(f"[@{segment}]\n{full_block_str}", target_content, count=1)
                 else:

@@ -46,14 +46,14 @@ class MirScriptEngine:
             # 3. 提取并记录所有的 Python 自定义变量 (用于UI生成)
             self._extract_variables(clean_line)
 
-            # 4. 识别 [@代码段]
-            segment_match = re.match(r'^\[@(.*?)\]$', clean_line)
+            # 4. 识别 [@代码段] (增强识别：支持 [ @段名 ] 等变体)
+            segment_match = re.match(r'^\[\s*@\s*(.*?)\s*\]$', clean_line)
             if segment_match:
                 # 保存上一个块
                 if current_block_data["lines"]:
                     self.ast[current_segment].append(current_block_data)
-                    
-                current_segment = segment_match.group(1)
+
+                current_segment = segment_match.group(1).strip() # 去除可能存在的内部空格
                 self.ast[current_segment] = []
                 current_block = "None"
                 current_block_data = {"type": current_block, "lines": []}
