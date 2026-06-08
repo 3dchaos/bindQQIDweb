@@ -23,7 +23,7 @@ INC N$真实体魄 <$STR(N$等级叠加)>
 INC N$真实宝宝 <$LEVEL>
 MOV S$战士BUFF文本 攻速+<$STR(N$真实战速)>(等级/10)\
 MOV S$法师BUFF文本 防御+<$STR(N$真实体魄)>(等级/5)\
-MOV S$道士BUFF文本 宝宝属性+<$STR(<$LEVEL>)>%(等级)\
+MOV S$道士BUFF文本 宝宝属性+<$LEVEL>%(等级)\
 
 ;CDK叠加
 ;卡数X50
@@ -39,8 +39,9 @@ INC N$真实战速 <$STR(N$CDK叠加)>
 INC S$战士BUFF文本 攻速+<$STR(N$CDK叠加)>(CDK数量/2)\
 
 ;原始卡数
-INC N$真实体魄 <$STR(*CDK数量变量*)>
-INC S$法师BUFF文本 防御+<$STR(*CDK数量变量*)>(CDK数量)\
+DIV N$CDK叠加 *CDK数量变量* 2
+INC N$真实体魄 <$STR(N$CDK叠加)>
+INC S$法师BUFF文本 防御+<$STR(N$CDK叠加)>(CDK数量/2)\
 
 ;卡数X10
 MUL N$CDK叠加 *CDK数量变量* 10
@@ -56,9 +57,9 @@ CHANGESPEED 2 <$STR(N$真实战速)>
 #IF
 CheckJob WIZARD
 #ACT
-ChangeHumAbility 1 = <$STR(N$真实体魄)>
+;ChangeHumAbility 1 = <$STR(N$真实体魄)>
 ChangeHumAbility 2 = <$STR(N$真实体魄)>
-ChangeHumAbility 3 = <$STR(N$真实体魄)>
+;ChangeHumAbility 3 = <$STR(N$真实体魄)>
 ChangeHumAbility 4 = <$STR(N$真实体魄)>
 
 #IF
