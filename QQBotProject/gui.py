@@ -15,7 +15,7 @@ import script_implant
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("老登群服管理中心 v1.2")
+        self.root.title("典狱长群服管理中心 v1.2")
         self.root.geometry("1100x650")
 
         self.worker = None
@@ -191,7 +191,7 @@ class App:
         self.lbl_implant_items = {}
         f_status = ttk.Frame(implant_f)
         f_status.pack(fill="x")
-        for name, fname in [("QF", "QF.txt"), ("QM", "QM.txt"), ("NPC", "老登.txt"), ("功能", "老登功能")]:
+        for name, fname in [("QF", "QF.txt"), ("QM", "QM.txt"), ("NPC", "典狱长.txt"), ("功能", "典狱长功能")]:
             lbl = tk.Label(f_status, text=name, width=4, fg="white", bg="grey", font=("", 8))
             lbl.pack(side="left", padx=2, pady=1)
             self.lbl_implant_items[name] = (lbl, fname)

@@ -41,8 +41,8 @@ class BotWorker:
             self.base_dir = os.path.dirname(sys.executable)
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.game_unused_file = os.path.join(self.base_dir, "Mir2Text", "老登功能", "未使用CDK.txt")
-        self.game_used_log_file = os.path.join(self.base_dir, "Mir2Text", "老登功能", "已使用.txt")
+        self.game_unused_file = os.path.join(self.base_dir, "Mir2Text", "典狱长功能", "未使用CDK.txt")
+        self.game_used_log_file = os.path.join(self.base_dir, "Mir2Text", "典狱长功能", "已使用.txt")
         
         # API 异步请求字典
         self.pending_requests = {}

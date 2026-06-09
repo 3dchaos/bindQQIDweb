@@ -40,13 +40,13 @@ def get_unified_variables(mir_path, log_callback=None):
         return {}
 
     all_files = []
-    # QF.txt, QM.txt, 老登.txt
-    for f in ["QF.txt", "QM.txt", "老登.txt"]:
+    # QF.txt, QM.txt, 典狱长.txt
+    for f in ["QF.txt", "QM.txt", "典狱长.txt"]:
         p = os.path.join(mir_path, f)
         if os.path.exists(p): all_files.append(p)
     
-    # 老登功能/*.txt
-    func_dir = os.path.join(mir_path, "老登功能")
+    # 典狱长功能/*.txt
+    func_dir = os.path.join(mir_path, "典狱长功能")
     if os.path.isdir(func_dir):
         for f in os.listdir(func_dir):
             if f.endswith(".txt"):
@@ -107,22 +107,22 @@ def implant_scripts(version_dir, mir_path, user_inputs, log_callback):
             except Exception as e:
                 log_callback(f"❌ QManage.txt 注入异常: {e}")
 
-        # 3. 老登.txt 替换
-        npc_dest = os.path.join(version_dir, "Mir200", "Envir", "Market_Def", "老登.txt")
-        npc_src = os.path.join(mir_path, "老登.txt")
+        # 3. 典狱长.txt 替换
+        npc_dest = os.path.join(version_dir, "Mir200", "Envir", "Market_Def", "典狱长.txt")
+        npc_src = os.path.join(mir_path, "典狱长.txt")
         if os.path.exists(npc_src):
             try:
                 npc_engine = MirScriptEngine(npc_src)
                 npc_engine.build_script(user_inputs, npc_dest)
-                log_callback("✅ 老登.txt (NPC) 写入成功")
+                log_callback("✅ 典狱长.txt (NPC) 写入成功")
             except PermissionError:
-                log_callback("❌ 老登.txt 写入失败: 文件被占用")
+                log_callback("❌ 典狱长.txt 写入失败: 文件被占用")
             except Exception as e:
-                log_callback(f"❌ 老登.txt 写入异常: {e}")
+                log_callback(f"❌ 典狱长.txt 写入异常: {e}")
 
-        # 4. 老登功能目录替换
-        func_dest_dir = os.path.join(version_dir, "Mir200", "Envir", "QuestDiary", "老登功能")
-        func_src_dir = os.path.join(mir_path, "老登功能")
+        # 4. 典狱长功能目录替换
+        func_dest_dir = os.path.join(version_dir, "Mir200", "Envir", "QuestDiary", "典狱长功能")
+        func_src_dir = os.path.join(mir_path, "典狱长功能")
         if os.path.isdir(func_src_dir):
             if not os.path.exists(func_dest_dir):
                 os.makedirs(func_dest_dir)
@@ -139,7 +139,7 @@ def implant_scripts(version_dir, mir_path, user_inputs, log_callback):
                     except Exception as e:
                         log_callback(f"⚠️ 同步文件 {f_name} 失败: {e}")
             
-            log_callback("✅ 老登功能 目录同步完成 (增量覆盖模式)")
+            log_callback("✅ 典狱长功能 目录同步完成 (增量覆盖模式)")
         
         return True
 

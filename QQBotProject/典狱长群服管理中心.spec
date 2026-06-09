@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='老登群服管理中心',
+    name='典狱长群服管理中心',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
