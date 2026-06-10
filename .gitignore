@@ -3,3 +3,4 @@ build/
 *.exe
 __pycache__/
 *.db*
+QQBotProject/dist/
