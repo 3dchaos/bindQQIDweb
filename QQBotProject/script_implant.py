@@ -44,7 +44,7 @@ def get_unified_variables(mir_path, log_callback=None):
     for f in ["QF.txt", "QM.txt", "典狱长.txt"]:
         p = os.path.join(mir_path, f)
         if os.path.exists(p): all_files.append(p)
-    
+
     # 典狱长功能/*.txt
     func_dir = os.path.join(mir_path, "典狱长功能")
     if os.path.isdir(func_dir):
@@ -75,7 +75,7 @@ def get_game_name(version_dir, log_callback=None):
                 cp.read(ini_path, encoding="gbk")
             except:
                 cp.read(ini_path, encoding="utf-8")
-            
+
             return cp.get("GameConf", "GameName", fallback="未知")
         except Exception as e:
             if log_callback: log_callback(f"⚠️ 读取 Config.ini 异常: {e}")
@@ -86,7 +86,7 @@ def implant_scripts(version_dir, mir_path, user_inputs, log_callback, selected_i
     """执行脚本注入核心逻辑"""
     if selected_items is None:
         selected_items = ["QF", "QM", "NPC", "功能"]
-    
+
     try:
         # 1. QFunction-0.txt 注入
         if "QF" in selected_items:
@@ -133,7 +133,7 @@ def implant_scripts(version_dir, mir_path, user_inputs, log_callback, selected_i
             if os.path.isdir(func_src_dir):
                 if not os.path.exists(func_dest_dir):
                     os.makedirs(func_dest_dir)
-                
+
                 for f_name in os.listdir(func_src_dir):
                     if f_name.endswith(".txt"):
                         src_f = os.path.join(func_src_dir, f_name)
@@ -145,9 +145,9 @@ def implant_scripts(version_dir, mir_path, user_inputs, log_callback, selected_i
                             log_callback(f"⚠️ 拒绝访问 (文件被占用): {f_name}，已跳过")
                         except Exception as e:
                             log_callback(f"⚠️ 同步文件 {f_name} 失败: {e}")
-                
+
                 log_callback("✅ 典狱长功能 目录同步完成 (增量覆盖模式)")
-        
+
         return True
 
     except Exception as e:
@@ -173,111 +173,306 @@ def clear_gm_list(version_dir, log_callback):
 
 def obfuscate_gm_commands(version_dir, log_callback):
     """混淆 GM 命令 (Command.ini)"""
-    cmd_ini_path = os.path.join(version_dir, "Mir200", "Envir", "Command.ini")
+    # 优先使用 Mir200 根目录下的 Command.ini
+    cmd_ini_path = os.path.join(version_dir, "Mir200", "Command.ini")
     if not os.path.exists(cmd_ini_path):
-        log_callback("⚠️ 未找到 Command.ini，无法混淆")
-        return False
-    
+        # 兼容性检查 Envir 目录
+        alt_path = os.path.join(version_dir, "Mir200", "Envir", "Command.ini")
+        if os.path.exists(alt_path):
+            cmd_ini_path = alt_path
+        else:
+            log_callback("⚠️ 未找到 Command.ini，无法混淆")
+            return False
+
     import random
     import string
-    
-    def get_random_cmd(length=8):
-        return "".join(random.choices(string.ascii_letters, k=length))
+    import shutil
 
-    # 需要混淆的常见敏感命令
-    target_cmds = ["GameMaster", "ReloadGui", "ReloadAbil", "ChangeAdmin", "AddGm", "DelGm", "Who"]
-    
+    def get_random_cmd(length=13):
+        return "".join(random.choices(string.ascii_letters + string.digits, k=length))
+
     try:
-        # 使用 ConfigParser 可能破坏原有注释，改用正则替换
+        # 备份原始文件
+        backup_path = os.path.join(os.path.dirname(cmd_ini_path), "Command备份.ini")
+        try:
+            shutil.copy2(cmd_ini_path, backup_path)
+            log_callback(f"🔹 已创建备份: {os.path.basename(backup_path)}")
+        except Exception as e:
+            log_callback(f"⚠️ 备份失败 (尝试继续): {e}")
+
         with open(cmd_ini_path, 'r', encoding='gb18030', errors='ignore') as f:
-            content = f.read()
-        
-        modified = False
-        for cmd in target_cmds:
-            # 匹配 "GameMaster=XXX" 这种格式，不区分大小写
-            pattern = re.compile(r'^(' + re.escape(cmd) + r'\s*=\s*)(.*)$', re.MULTILINE | re.IGNORECASE)
-            if pattern.search(content):
+            lines = f.readlines()
+
+        new_lines = []
+        in_command_section = False
+        obfuscated_count = 0
+
+        for line in lines:
+            stripped = line.strip()
+            # 识别段落头部
+            if stripped.startswith('[') and stripped.endswith(']'):
+                if stripped.lower() == '[command]':
+                    in_command_section = True
+                else:
+                    in_command_section = False
+                new_lines.append(line)
+                continue
+
+            # 如果在 [Command] 段落内，且行包含 '=' 且不以分号开头（非注释）
+            if in_command_section and '=' in line and not stripped.startswith(';'):
+                # 分割 Key 和 Value
+                parts = line.split('=', 1)
+                key = parts[0]
+                # 生成 13 位随机乱码 (字母+数字)
                 new_val = get_random_cmd()
-                content = pattern.sub(r'\1' + new_val, content)
-                log_callback(f"🔹 命令 [{cmd}] 已混淆为: {new_val}")
-                modified = True
-        
-        if modified:
+                # 拼接回行，注意保留原始换行符
+                newline_char = "\n" if line.endswith("\n") else ""
+                new_lines.append(f"{key}={new_val}{newline_char}")
+                obfuscated_count += 1
+            else:
+                new_lines.append(line)
+
+        if obfuscated_count > 0:
             with open(cmd_ini_path, 'w', encoding='gb18030') as f:
-                f.write(content)
-            log_callback("✅ Command.ini 混淆完成")
+                f.writelines(new_lines)
+            log_callback(f"✅ Command.ini 混淆完成 (路径: Mir200), 共处理 {obfuscated_count} 个项目")
         else:
-            log_callback("提示: Command.ini 中未发现敏感命令，无需混淆")
+            log_callback("提示: Command.ini 中未发现 [Command] 节点或有效指令")
+
         return True
     except Exception as e:
-        log_callback(f"❌ 混淆命令失败: {e}")
+        log_callback(f"❌ 混淆命令异常: {e}")
         return False
 
-def clean_suspicious_scripts(version_dir, log_callback):
-    """嫌疑脚本清理 (搜索常见后门关键字)"""
+# 嫌疑关键字列表
+SUSPICIOUS_KEYWORDS = [
+    "CHANGEPERMISSION", "SETPERMISSION", "GMEXECUTE", "CHANGEMODE",
+    "<$PASSWORD>", "<$BIRTHDAY>", "<$ACCOUNTUSERNAME>", "<$QUIZ1>",
+    "<$ANSWER1>", "<$QUIZ2>", "<$ANSWER2>", "<$PHONE>",
+    "<$MOBILEPHONE>", "<$EMAIL>", "[A,B,C", "$sjkk-1"
+]
+SUSPICIOUS_CLEANED_MARKER = "Suspicious script segment removed"
+
+BINARY_EXTENSIONS = {
+    ".bmp", ".dat", ".db", ".dll", ".exe", ".gif", ".idx", ".jpg", ".jpeg",
+    ".map", ".png", ".rle", ".so", ".wav", ".wil", ".wis", ".wix", ".zip"
+}
+
+def _read_text_lines(file_path):
+    """读取传奇脚本文本，兼容 UTF-8 和 Windows ANSI/GBK 系编码。"""
+    try:
+        with open(file_path, 'rb') as f:
+            raw = f.read()
+    except Exception:
+        return None, None
+
+    encodings = []
+    if raw.startswith(b'\xef\xbb\xbf'):
+        encodings.append('utf-8-sig')
+    elif any(byte >= 0x80 for byte in raw):
+        encodings.extend(('utf-8', 'gb18030', 'mbcs'))
+    else:
+        encodings.append('gb18030')
+
+    for encoding in encodings:
+        try:
+            text = raw.decode(encoding)
+            return text.splitlines(True), encoding
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    try:
+        text = raw.decode('gb18030', errors='ignore')
+        return text.splitlines(True), 'gb18030'
+    except Exception:
+        return None, None
+
+def _is_probably_text_file(file_name):
+    return os.path.splitext(file_name)[1].lower() not in BINARY_EXTENSIONS
+
+def _find_suspicious_keywords(content):
+    if SUSPICIOUS_CLEANED_MARKER.lower() in content.lower():
+        return []
+
+    lower_content = content.lower()
+    return [kw for kw in SUSPICIOUS_KEYWORDS if kw.lower() in lower_content]
+
+def scan_for_suspicious_segments(version_dir, log_callback):
+    """扫描嫌疑脚本段落，返回结构化数据"""
     envir_dir = os.path.join(version_dir, "Mir200", "Envir")
     if not os.path.isdir(envir_dir):
-        log_callback("⚠️ 未找到 Envir 目录，无法扫描")
-        return False
-    
-    # 敏感关键字
-    keywords = ["ChangePermission", "AddGm", "DelGm", "GameMaster", "SuperUser", "ISADMIN"]
-    suspect_files = []
-    
-    log_callback("🔍 正在扫描 Envir 目录下的可疑脚本...")
-    
+        log_callback("⚠️ 未找到 Envir 目录，扫描中止")
+        return []
+
+    results = []
+    log_callback("🔍 正在深度扫描脚本段落...")
+
     for root, dirs, files in os.walk(envir_dir):
         for file in files:
-            if file.endswith(".txt") or file.endswith(".ini"):
-                f_path = os.path.join(root, file)
-                try:
-                    with open(f_path, 'r', encoding='gb18030', errors='ignore') as f:
-                        content = f.read()
-                        found = []
-                        for kw in keywords:
-                            if kw.lower() in content.lower():
-                                found.append(kw)
-                        
-                        if found:
-                            rel_path = os.path.relpath(f_path, envir_dir)
-                            # 排除掉正常的注入文件
-                            if "典狱长" in rel_path: continue
-                            
-                            suspect_files.append((rel_path, found))
-                except:
+            if not _is_probably_text_file(file):
+                continue
+
+            f_path = os.path.join(root, file)
+            rel_path = os.path.relpath(f_path, envir_dir)
+
+            # 排除掉自己注入的文件
+            if "典狱长" in rel_path:
+                continue
+
+            try:
+                lines, encoding = _read_text_lines(f_path)
+                if lines is None:
                     continue
-    
-    if suspect_files:
-        log_callback(f"⚠️ 扫描完成，发现 {len(suspect_files)} 个可疑文件:")
-        for path, kws in suspect_files:
-            log_callback(f"  - {path} [包含: {', '.join(kws)}]")
-        log_callback("提示: 请手动检查以上文件，暂不执行自动删除以防误杀")
-    else:
-        log_callback("✅ 脚本扫描完成，未发现明显后门关键字")
-    
-    return True
+
+                # 分段解析
+                current_seg_name = "Global/Header"
+                current_seg_lines = []
+                current_start_line = 1
+
+                def check_and_add(name, lines_list, path, start_line):
+                    content = "".join(lines_list)
+                    matched_keywords = _find_suspicious_keywords(content)
+                    if matched_keywords:
+                        results.append({
+                            'path': path,
+                            'rel_path': os.path.relpath(path, envir_dir),
+                            'segment': name,
+                            'content': content,
+                            'keyword': matched_keywords[0],
+                            'keywords': matched_keywords,
+                            'start_line': start_line,
+                            'end_line': start_line + len(lines_list) - 1,
+                            'encoding': encoding
+                        })
+
+                for index, line in enumerate(lines, start=1):
+                    stripped = line.strip()
+                    # 识别段落开始 [@Name] 或 [QuestNo]
+                    if stripped.startswith('[') and stripped.endswith(']'):
+                        # 先检查上一个段落
+                        if current_seg_lines:
+                            check_and_add(current_seg_name, current_seg_lines, f_path, current_start_line)
+
+                        current_seg_name = stripped
+                        current_seg_lines = [line]
+                        current_start_line = index
+                    else:
+                        current_seg_lines.append(line)
+
+                # 检查最后一个段落
+                if current_seg_lines:
+                    check_and_add(current_seg_name, current_seg_lines, f_path, current_start_line)
+
+            except Exception as e:
+                log_callback(f"⚠️ 扫描文件失败，已跳过: {rel_path} ({e})")
+
+    log_callback(f"✅ 扫描完成，共发现 {len(results)} 处嫌疑代码段")
+    return results
+
+def delete_script_segments(targets, log_callback):
+    """
+    删除指定的脚本段落
+    targets: [{path, segment, content}, ...]
+    """
+    # 按文件分组处理，避免重复读写
+    file_groups = {}
+    for t in targets:
+        if t['path'] not in file_groups:
+            file_groups[t['path']] = []
+        file_groups[t['path']].append(t)
+
+    success_count = 0
+    for f_path, segs in file_groups.items():
+        try:
+            lines, encoding = _read_text_lines(f_path)
+            if lines is None:
+                log_callback(f"❌ 无法读取文件，已跳过: {os.path.basename(f_path)}")
+                continue
+
+            modified = False
+            ordered_segs = sorted(segs, key=lambda item: item.get('start_line', 0), reverse=True)
+            for s in ordered_segs:
+                start = int(s.get('start_line', 0)) - 1
+                end = int(s.get('end_line', 0))
+                if start < 0 or end <= start or end > len(lines):
+                    log_callback(f"⚠️ 行号已变化，跳过: {os.path.basename(f_path)} {s.get('segment', '')}")
+                    continue
+
+                current_content = "".join(lines[start:end])
+                matched_keywords = _find_suspicious_keywords(current_content)
+                if matched_keywords:
+                    marker = f"; --- {SUSPICIOUS_CLEANED_MARKER} ---\n"
+                    lines[start:end] = [marker]
+                    modified = True
+                    success_count += 1
+                else:
+                    log_callback(f"⚠️ 段落内容已变化，跳过: {os.path.basename(f_path)} {s.get('segment', '')}")
+
+            if modified:
+                with open(f_path, 'w', encoding=encoding or 'gb18030', newline='') as f:
+                    f.writelines(lines)
+                log_callback(f"🛡️ 已处理文件: {os.path.basename(f_path)}")
+
+        except Exception as e:
+            log_callback(f"❌ 处理文件 {os.path.basename(f_path)} 失败: {e}")
+
+    return success_count
 
 def clear_custom_commands(version_dir, log_callback):
-    """清除自定义命令 (UserCommand.txt)"""
-    user_cmd_path = os.path.join(version_dir, "Mir200", "Envir", "UserCommand.txt")
-    try:
-        if os.path.exists(user_cmd_path):
-            with open(user_cmd_path, 'w', encoding='gb18030') as f:
-                f.write("")
-            log_callback("✅ UserCommand.txt (自定义命令) 已清空")
-        else:
-            log_callback("提示: 未找到 UserCommand.txt，无需清理")
-        return True
-    except Exception as e:
-        log_callback(f"❌ 清除自定义命令失败: {e}")
-        return False
+    """清除自定义命令 (UserCmd.txt, UserCmds.txt)"""
+    envir_dir = os.path.join(version_dir, "Mir200", "Envir")
+    targets = ["UserCmd.txt", "UserCmds.txt", "UserCommand.txt"]
+
+    success = True
+    found_any = False
+
+    for filename in targets:
+        f_path = os.path.join(envir_dir, filename)
+        if os.path.exists(f_path):
+            try:
+                with open(f_path, 'w', encoding='gb18030') as f:
+                    f.write("")
+                log_callback(f"✅ {filename} (自定义命令) 已清空")
+                found_any = True
+            except Exception as e:
+                log_callback(f"❌ 清除 {filename} 失败: {e}")
+                success = False
+
+    if not found_any:
+        log_callback("提示: 未发现任何自定义命令配置文件 (UserCmd/UserCmds)，无需清理")
+
+    return success
 
 def intercept_role_trade(version_dir, log_callback):
-    """角色交易拦截 (占位/清理相关交易脚本)"""
-    log_callback("🔹 正在执行角色交易安全性检查...")
-    # 实际逻辑可能涉及 QFunction 中相关段落的清理或注入
-    log_callback("✅ 角色交易安全性增强处理完成")
-    return True
+    """将角色交易拦截脚本注入 QFunction-0.txt"""
+    mir_path = get_mir_path()
+    template_path = os.path.join(mir_path, "QF拦截角色交易.txt")
+    qf_dest = os.path.join(version_dir, "Mir200", "Envir", "Market_Def", "QFunction-0.txt")
+
+    log_callback("🔹 正在注入角色交易拦截脚本...")
+
+    if not os.path.exists(template_path):
+        log_callback(f"❌ 未找到角色交易拦截模板: {template_path}")
+        return False
+
+    if not os.path.exists(qf_dest):
+        log_callback(f"❌ 未找到 QFunction-0.txt，无法注入: {qf_dest}")
+        return False
+
+    try:
+        template_lines, _ = _read_text_lines(template_path)
+        if template_lines is None:
+            log_callback(f"❌ 无法读取角色交易拦截模板: {template_path}")
+            return False
+        template_content = "".join(template_lines)
+
+        if not smart_implant_to_file(qf_dest, template_content, log_callback):
+            return False
+        log_callback("✅ 角色交易拦截脚本已注入 QFunction-0.txt")
+        return True
+    except Exception as e:
+        log_callback(f"❌ 角色交易拦截脚本注入失败: {e}")
+        return False
 
 def smart_implant_to_file(dest_path, built_content, log_callback):
     """
@@ -289,7 +484,7 @@ def smart_implant_to_file(dest_path, built_content, log_callback):
     """
     if not os.path.exists(dest_path):
         log_callback(f"⚠️ 目标文件不存在，无法注入: {os.path.basename(dest_path)}")
-        return
+        return False
 
     try:
         with open(dest_path, 'r', encoding='gb18030', errors='ignore') as f:
@@ -303,7 +498,7 @@ def smart_implant_to_file(dest_path, built_content, log_callback):
 
         if not blocks:
             log_callback(f"⚠️ 模板内未发现协议标记，跳过智能注入: {os.path.basename(dest_path)}")
-            return
+            return False
 
         for full_block, instruction in blocks:
             # a. 先清理掉旧的同名块 (根据标记描述识别)
@@ -313,13 +508,13 @@ def smart_implant_to_file(dest_path, built_content, log_callback):
             # b. 解析指令
             action = "追加"
             segment = None
-            
+
             # 匹配 "植入@Login=..." 或 "覆盖@Help=..."
             m = re.match(r"(植入|覆盖)@([^=]+)=", instruction)
             if m:
                 action = m.group(1)
                 segment = m.group(2).strip()
-            
+
             # c. 执行动作
             full_block_str = full_block.strip()
             if action == "覆盖" and segment:
@@ -344,6 +539,8 @@ def smart_implant_to_file(dest_path, built_content, log_callback):
         # 写入文件
         with open(dest_path, 'w', encoding='gb18030') as f:
             f.write(target_content.strip() + "\n")
-            
+
+        return True
     except Exception as e:
         log_callback(f"❌ 智能注入失败 ({os.path.basename(dest_path)}): {e}")
+        return False

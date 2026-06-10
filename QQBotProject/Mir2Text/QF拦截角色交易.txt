@@ -1,0 +1,51 @@
+;=======================================典狱长群服专用拦截角色交易开始=======================================
+;角色上架前触发
+[@BeforePlayerSelling]
+#ACT
+;终止上架
+BreakAddSellPlayer
+ADDIPLIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+ADDNAMELIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+messagebox SB，这是第一道防线!
+KICK
+
+;角色购买前触发
+[@BeginBuyUser]
+#ACT
+;终止交易
+StopBuyUser
+ADDIPLIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+ADDNAMELIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+messagebox SB，还有第二道防线!
+KICK
+
+;角色出售后触发
+[@PlayerSold]
+#ACT
+GameGold = 0
+GamePoint = 0
+GoldCount = 0
+GameDiamond = 0
+GameGird = 0
+CreditPoint = 0
+GameGlory = 0
+ADDIPLIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+ADDNAMELIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+messagebox 厉害，接受审判吧！
+KICK
+
+;角色购买后触发
+[@PlayerBuyIn]
+#ACT
+GameGold = 0
+GamePoint = 0
+GoldCount = 0
+GameDiamond = 0
+GameGird = 0
+CreditPoint = 0
+GameGlory = 0
+ADDIPLIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+ADDNAMELIST ..\QuestDiary\刷货币名单\刷货币名单.txt
+messagebox 厉害，接受审判吧！
+KICK
+;=======================================典狱长群服专用拦截角色交易结束=======================================

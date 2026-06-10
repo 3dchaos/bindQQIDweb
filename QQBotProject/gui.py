@@ -2,6 +2,8 @@ import os
 import sys
 import threading
 import asyncio
+import subprocess
+import webbrowser
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 import dataset
@@ -12,12 +14,15 @@ from bot_core import BotWorker
 from config import DB_URL, DEFAULT_WS_URL, DEFAULT_BIND_FILE
 import script_implant
 
+OFFICIAL_SITE_URL = "https://dyznb.com/"
+
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("典狱长群服管理中心 v1.2")
-        self.root.geometry("1180x720")
+        self.root.geometry("1180x800")
         self.root.minsize(1080, 680)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.worker = None
         self.script_vars_entries = {} # 存储变量名和对应的 Entry
@@ -25,6 +30,7 @@ class App:
         self.load_config_from_db()
         self.load_data()
         self.check_implant_files() # 初始检测一次
+        self.root.after(800, self.open_official_site)
 
     def setup_ui(self):
         # --- 顶部：分左右两半 ---
@@ -34,7 +40,7 @@ class App:
         # 1. 左侧：连接设置
         top_left = ttk.LabelFrame(top_container, text="LLOneBot 连接设置")
         top_left.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        
+
         ttk.Label(top_left, text="WS:").pack(side="left", padx=2)
         self.ent_url = ttk.Entry(top_left, width=30)
         self.ent_url.pack(side="left", fill="x", expand=True, padx=2)
@@ -51,7 +57,7 @@ class App:
         # 2. 右侧：同步目录设置
         top_right = ttk.LabelFrame(top_container, text="同步目录设置")
         top_right.pack(side="left", fill="both", expand=True, padx=(5, 0))
-        
+
         # 使用 Grid 缩减高度
         # 私聊注册
         f1 = ttk.Frame(top_right)
@@ -64,7 +70,7 @@ class App:
         # 游戏文件 (并排显示)
         f23 = ttk.Frame(top_right)
         f23.pack(fill="x", pady=1)
-        
+
         ttk.Label(f23, text="未使用:", width=6).pack(side="left")
         self.ent_unused_path = ttk.Entry(f23)
         self.ent_unused_path.pack(side="left", fill="x", expand=True, padx=2)
@@ -80,6 +86,45 @@ class App:
         sync_btn_f.pack(fill="x", pady=2)
         ttk.Button(sync_btn_f, text="📥 日志->DB", command=self.force_sync_text_to_db).pack(side="left", padx=2, expand=True, fill="x")
         ttk.Button(sync_btn_f, text="📤 DB->未使用", command=self.force_sync_db_to_text).pack(side="left", padx=2, expand=True, fill="x")
+
+        # --- 广告位 ---
+        ad_frame = tk.Frame(self.root, bg="#101820", cursor="hand2", height=58)
+        ad_frame.pack(fill="x", padx=10, pady=(0, 5))
+        ad_frame.pack_propagate(False)
+        ad_frame.bind("<Button-1>", lambda event: self.open_official_site())
+
+        ad_title = tk.Label(
+            ad_frame,
+            text="典狱长软件监控网关",
+            bg="#101820",
+            fg="#f2c94c",
+            font=("", 13, "bold"),
+            cursor="hand2"
+        )
+        ad_title.pack(side="left", padx=(14, 10))
+        ad_title.bind("<Button-1>", lambda event: self.open_official_site())
+
+        ad_text = tk.Label(
+            ad_frame,
+            text="让流氓软件无处遁形 · 守护程序安全",
+            bg="#101820",
+            fg="#f7f7f7",
+            font=("", 10),
+            cursor="hand2"
+        )
+        ad_text.pack(side="left")
+        ad_text.bind("<Button-1>", lambda event: self.open_official_site())
+
+        ad_link = tk.Label(
+            ad_frame,
+            text="访问官网 dyznb.com",
+            bg="#101820",
+            fg="#8fd3ff",
+            font=("", 10, "underline"),
+            cursor="hand2"
+        )
+        ad_link.pack(side="right", padx=14)
+        ad_link.bind("<Button-1>", lambda event: self.open_official_site())
 
         # --- 中间主体 (核心功能区 + 日志) ---
         mid_frame = ttk.Frame(self.root)
@@ -100,10 +145,10 @@ class App:
         # --- 第一列：上限控制 ---
         col1 = ttk.Frame(manage_panel)
         col1.grid(row=0, column=0, sticky="new", padx=(0, 4))
-        
+
         limit_box = ttk.LabelFrame(col1, text="上限控制")
         limit_box.pack(fill="x", pady=5)
-        
+
         for text, spin_attr, val_range in [
             ("QQ注册上限:", "spin_limit", (1, 100)),
             ("CDK购上限:", "spin_cdk_limit", (1, 100)),
@@ -114,17 +159,17 @@ class App:
             ttk.Label(f, text=text).pack(side="left")
             setattr(self, spin_attr, tk.Spinbox(f, from_=val_range[0], to=val_range[1], width=5))
             getattr(self, spin_attr).pack(side="right", padx=5)
-        
+
         ttk.Button(limit_box, text="💾 保存所有上限", command=self.save_all_settings).pack(fill="x", padx=5, pady=5)
         ttk.Button(col1, text="🔃 刷新文本数据", command=self.load_data).pack(fill="x", pady=5)
 
         # --- 第二列：功能开关 ---
         col2 = ttk.Frame(manage_panel)
         col2.grid(row=0, column=1, sticky="new", padx=4)
-        
+
         grp_f = ttk.LabelFrame(col2, text="群功能开关")
         grp_f.pack(fill="x", pady=5)
-        
+
         switches = [
             ("开启群管理", "var_manage"),
             ("开启群签到", "var_checkin"),
@@ -135,7 +180,7 @@ class App:
         for text, var_attr in switches:
             setattr(self, var_attr, tk.BooleanVar(value=False))
             ttk.Checkbutton(grp_f, text=text, variable=getattr(self, var_attr), command=self.update_bot_flags).pack(anchor="w", padx=5)
-        
+
         # 解码/绑定
         for text, var_attr, ent_attr in [("解码", "var_decoder", "ent_decoder_group"), ("绑定", "var_group_bind", "ent_bind_group")]:
             setattr(self, var_attr, tk.BooleanVar(value=False))
@@ -148,14 +193,14 @@ class App:
         # --- 第三列：撤回 & 区服 ---
         col3 = ttk.Frame(manage_panel)
         col3.grid(row=0, column=2, sticky="new", padx=(4, 0))
-        
+
         recall_f = ttk.LabelFrame(col3, text="撤回设置")
         recall_f.pack(fill="x", pady=5)
-        
+
         self.var_auto_recall = tk.BooleanVar(value=False)
         self.var_recall_delay = tk.IntVar(value=3)
         self.recall_cmds_vars = {}
-        
+
         rc_top = ttk.Frame(recall_f)
         rc_top.pack(fill="x", padx=5, pady=2)
         ttk.Checkbutton(rc_top, text="自动", variable=self.var_auto_recall, command=self.update_bot_flags).pack(side="left")
@@ -196,10 +241,10 @@ class App:
         col4.grid_propagate(False)
         col4.rowconfigure(0, weight=1)
         col4.columnconfigure(0, weight=1)
-        
+
         implant_f = ttk.LabelFrame(col4, text="版本植入")
         implant_f.grid(row=0, column=0, sticky="nsew")
-        
+
         self.implant_vars = {}
         self.implant_checks = {}
         f_status = ttk.Frame(implant_f)
@@ -210,28 +255,28 @@ class App:
             chk = tk.Checkbutton(f_status, text=name, variable=var, width=4, fg="white", bg="grey", font=("", 8), selectcolor="#444444")
             chk.pack(side="left", padx=1, pady=1)
             self.implant_checks[name] = (chk, fname)
-            
+
         ttk.Button(implant_f, text="刷新变量", command=self.refresh_script_variables).pack(fill="x", padx=5, pady=2)
-        
+
         # 变量列表容器
         var_list_f = ttk.LabelFrame(implant_f, text="注入变量")
         var_list_f.pack(fill="both", expand=True, padx=5, pady=2)
-        
+
         self.canvas_vars = tk.Canvas(var_list_f, width=210, height=220, highlightthickness=0)
         self.scrollbar_vars = ttk.Scrollbar(var_list_f, orient="vertical", command=self.canvas_vars.yview)
         self.scrollable_vars_frame = ttk.Frame(self.canvas_vars)
-        
+
         self.scrollable_vars_frame.bind(
             "<Configure>",
             lambda e: self.canvas_vars.configure(scrollregion=self.canvas_vars.bbox("all"))
         )
-        
+
         self.canvas_vars.create_window((0, 0), window=self.scrollable_vars_frame, anchor="nw")
         self.canvas_vars.configure(yscrollcommand=self.scrollbar_vars.set)
-        
+
         self.canvas_vars.pack(side="left", fill="both", expand=True)
         self.scrollbar_vars.pack(side="right", fill="y")
-        
+
         self.ent_version_dir = ttk.Entry(implant_f, width=12)
         self.ent_version_dir.pack(fill="x", padx=5, pady=2)
         ttk.Button(implant_f, text="选择版本目录", command=self.browse_version_dir).pack(fill="x", padx=5)
@@ -287,7 +332,7 @@ class App:
                 self.ent_unused_path.insert(0, conf.get('game_unused_path', ""))
                 self.ent_used_log_path.delete(0, "end")
                 self.ent_used_log_path.insert(0, conf.get('game_used_log_path', ""))
-                
+
                 # 加载开关状态
                 self.var_manage.set(conf.get('enable_manage', False))
                 self.var_checkin.set(conf.get('enable_checkin', False))
@@ -296,7 +341,7 @@ class App:
                 self.var_auto_friend.set(conf.get('enable_auto_friend', False))
                 self.var_auto_recall.set(conf.get('enable_auto_recall', False))
                 self.var_recall_delay.set(conf.get('recall_delay', 3))
-                
+
                 # 加载撤回指令列表
                 import json
                 saved_cmds = conf.get('recall_cmds', "")
@@ -310,7 +355,7 @@ class App:
                 self.var_decoder.set(conf.get('enable_decoder', False))
                 self.ent_decoder_group.delete(0, "end")
                 self.ent_decoder_group.insert(0, str(conf.get('decoder_group', "")))
-                
+
                 self.var_group_bind.set(conf.get('enable_group_bind', False))
                 self.ent_bind_group.delete(0, "end")
                 self.ent_bind_group.insert(0, str(conf.get('bind_group', "")))
@@ -336,19 +381,19 @@ class App:
         url = self.ent_url.get().strip()
         token = self.ent_token.get().strip()
         filepath = self.get_current_file()
-        
+
         manage = self.var_manage.get()
         checkin = self.var_checkin.get()
         patrol = self.var_patrol.get()
         auto_friend = self.var_auto_friend.get()
         auto_recall = self.var_auto_recall.get()
         recall_delay = self.var_recall_delay.get()
-        
+
         # 获取开启撤回的指令列表
         import json
         recall_cmds = [cid for cid, var in self.recall_cmds_vars.items() if var.get()]
         recall_cmds_json = json.dumps(recall_cmds)
-        
+
         try:
             max_b = int(self.spin_limit.get())
         except: max_b = 2
@@ -365,9 +410,9 @@ class App:
         try:
             temp_db = dataset.connect(DB_URL)
             temp_db['Config'].upsert(dict(
-                id=1, 
-                ws_url=url, 
-                token=token, 
+                id=1,
+                ws_url=url,
+                token=token,
                 filepath=filepath,
                 game_unused_path=game_unused,
                 game_used_log_path=game_used,
@@ -496,11 +541,11 @@ class App:
     def cleanup_records(self):
         path = self.get_current_file()
         if not os.path.exists(path): return
-        
+
         zones, recs = read_file_data(path)
         valid_records = []
         removed_count = 0
-        
+
         for r in recs:
             try:
                 acc_zone = r.split('|')[0]
@@ -511,7 +556,7 @@ class App:
                     removed_count += 1
             except:
                 removed_count += 1
-        
+
         if removed_count > 0:
             if write_file_data(path, zones, valid_records):
                 self.log(f"清理完成: 已删除 {removed_count} 条失效注册记录 (所属区服不在列表中)")
@@ -524,7 +569,7 @@ class App:
     def start_bot(self):
         url = self.ent_url.get().strip()
         token = self.ent_token.get().strip()
-        
+
         # 启动前保存所有当前设置
         self.save_all_settings()
 
@@ -539,10 +584,10 @@ class App:
         try:
             self.worker.max_group_cdk = int(self.spin_group_cdk_limit.get())
         except: self.worker.max_group_cdk = 100
-        
+
         self.worker.game_unused_file = self.ent_unused_path.get().strip()
         self.worker.game_used_log_file = self.ent_used_log_path.get().strip()
-        
+
         self.worker.enable_group_manage = self.var_manage.get()
         self.worker.enable_checkin = self.var_checkin.get()
         self.worker.enable_patrol = self.var_patrol.get()
@@ -555,22 +600,22 @@ class App:
         self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
         self.worker.enable_group_bind = self.var_group_bind.get()
         self.worker.enable_bind_group = self.ent_bind_group.get().strip()
-        
+
         def run_async():
             self.worker.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.worker.loop)
             self.worker.loop.run_until_complete(self.worker.start())
-        
+
         self.thread = threading.Thread(target=run_async, daemon=True)
         self.thread.start()
-        
+
         self.btn_start.config(state="disabled")
         self.btn_stop.config(state="normal")
 
     def stop_bot(self):
         if self.worker:
             self.worker.running = False
-            if self.worker.loop: 
+            if self.worker.loop:
                 self.worker.loop.call_soon_threadsafe(self.worker.loop.stop)
         self.btn_start.config(state="normal")
         self.btn_stop.config(state="disabled")
@@ -669,31 +714,170 @@ class App:
             messagebox.showwarning("提示", "请选择至少一个清理项")
             return
 
-        if not messagebox.askyesno("确认", f"确定要执行安全清理吗？(已选 {len(selected_cleans)} 项)"):
+        if not messagebox.askyesno("确认", f"确定要执行安全清理吗？(已选 {len(selected_cleans)} 项)\n\n❗ 注意：请在【关闭引擎】情况下执行，或执行完毕后【重启引擎】以生效。"):
             return
-            
+
         self.log(f"系统: 开始执行安全清理...")
-        
+
         success_count = 0
         if self.clean_vars["obfuscate"].get():
             if script_implant.obfuscate_gm_commands(version_dir, self.log):
                 success_count += 1
-        
+
         if self.clean_vars["suspicious"].get():
-            if script_implant.clean_suspicious_scripts(version_dir, self.log):
+            # 特殊处理：弹出交互窗口
+            suspicious_results = script_implant.scan_for_suspicious_segments(version_dir, self.log)
+            if suspicious_results:
+                self.show_suspicious_cleanup_dialog(suspicious_results)
                 success_count += 1
-        
+            else:
+                self.log("✅ 嫌疑脚本扫描完成，未发现需要清理的代码段")
+                success_count += 1 # 没扫到也算某种意义上的成功
+
         if self.clean_vars["gm_list"].get():
             if script_implant.clear_gm_list(version_dir, self.log):
                 success_count += 1
-        
+
         if self.clean_vars["custom_cmds"].get():
             if script_implant.clear_custom_commands(version_dir, self.log):
                 success_count += 1
-        
+
         if self.clean_vars["trade_intercept"].get():
             if script_implant.intercept_role_trade(version_dir, self.log):
                 success_count += 1
 
         self.log(f"系统: 安全清理任务执行完毕，成功完成 {success_count}/{len(selected_cleans)} 项。")
         messagebox.showinfo("完成", f"安全清理任务执行完毕！\n成功完成 {success_count} 项操作。")
+
+    def show_suspicious_cleanup_dialog(self, results):
+        """显示嫌疑代码清理对话框"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("🛡️ 嫌疑代码段落清理确认")
+        dialog.geometry("900x640")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        lbl = ttk.Label(dialog, text=f"共发现 {len(results)} 处嫌疑代码段，请确认是否删除 (默认全选):", font=("", 10, "bold"))
+        lbl.pack(fill="x", padx=10, pady=10)
+
+        # 滚动区域
+        container = ttk.Frame(dialog)
+        container.pack(fill="both", expand=True, padx=10, pady=5)
+
+        canvas = tk.Canvas(container)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # 列表条目
+        item_vars = []
+        for res in results:
+            var = tk.BooleanVar(value=True)
+            item_vars.append((var, res))
+
+            frame = ttk.LabelFrame(scrollable_frame, text=f"文件: {res['rel_path']} | 行: {res.get('start_line', '?')}-{res.get('end_line', '?')} | 段落: {res['segment']}")
+            frame.pack(fill="x", padx=5, pady=5)
+
+            top_line = ttk.Frame(frame)
+            top_line.pack(fill="x")
+            keywords = ", ".join(res.get('keywords') or [res['keyword']])
+            ttk.Checkbutton(top_line, text=f"包含关键字: {keywords}", variable=var).pack(side="left")
+            ttk.Button(
+                top_line,
+                text="打开文本",
+                command=lambda item=res: self.open_text_at_line(item.get('path'), item.get('start_line', 1)),
+                width=10
+            ).pack(side="right", padx=5)
+
+            # 显示内容预览 (只看前几行)
+            txt = tk.Text(frame, height=5, font=("Consolas", 9), wrap="none")
+            txt.insert("1.0", res['content'])
+            txt.config(state="disabled")
+            txt.pack(fill="x", padx=5, pady=2)
+
+        def do_delete():
+            to_delete = [res for var, res in item_vars if var.get()]
+            if not to_delete:
+                dialog.destroy()
+                return
+
+            if messagebox.askyesno("确认删除", f"确定要从脚本中永久删除选中的 {len(to_delete)} 处代码吗？"):
+                count = script_implant.delete_script_segments(to_delete, self.log)
+                messagebox.showinfo("完成", f"已成功删除 {count} 处嫌疑代码段！")
+                dialog.destroy()
+
+        btn_f = ttk.Frame(dialog)
+        btn_f.pack(fill="x", pady=10)
+        ttk.Button(btn_f, text="立即清理选中项", command=do_delete, width=20).pack(side="right", padx=10)
+        ttk.Button(btn_f, text="取消", command=dialog.destroy, width=10).pack(side="right", padx=5)
+        dialog.wait_window()
+
+    def open_text_at_line(self, file_path, line_no=1):
+        """打开文本文件，并尽量跳转到指定行。"""
+        if not file_path or not os.path.exists(file_path):
+            messagebox.showerror("错误", "文件不存在，无法打开")
+            return
+
+        try:
+            line_no = max(1, int(line_no or 1))
+        except (TypeError, ValueError):
+            line_no = 1
+
+        editors = []
+        code_cmd = shutil.which("code") or shutil.which("code.cmd")
+        if code_cmd:
+            editors.append([code_cmd, "-g", f"{file_path}:{line_no}"])
+
+        notepadpp_cmd = shutil.which("notepad++") or shutil.which("notepad++.exe")
+        common_notepadpp_paths = [
+            r"C:\Program Files\Notepad++\notepad++.exe",
+            r"C:\Program Files (x86)\Notepad++\notepad++.exe"
+        ]
+        if not notepadpp_cmd:
+            notepadpp_cmd = next((path for path in common_notepadpp_paths if os.path.exists(path)), None)
+        if notepadpp_cmd:
+            editors.append([notepadpp_cmd, f"-n{line_no}", file_path])
+
+        subl_cmd = shutil.which("subl") or shutil.which("sublime_text")
+        if subl_cmd:
+            editors.append([subl_cmd, f"{file_path}:{line_no}"])
+
+        for command in editors:
+            try:
+                subprocess.Popen(command)
+                self.log(f"已打开文本: {file_path} (行 {line_no})")
+                return
+            except Exception as e:
+                self.log(f"打开编辑器失败，尝试下一个: {e}")
+
+        try:
+            os.startfile(file_path)
+            self.log(f"已用默认程序打开文本: {file_path}。当前默认编辑器不支持自动跳转到第 {line_no} 行。")
+        except Exception as e:
+            messagebox.showerror("错误", f"打开文本失败: {e}")
+
+    def open_official_site(self):
+        """打开典狱长官网。"""
+        try:
+            webbrowser.open(OFFICIAL_SITE_URL, new=2)
+        except Exception as e:
+            self.log(f"打开官网失败: {e}")
+
+    def on_close(self):
+        """关闭程序前打开官网。"""
+        self.open_official_site()
+        if self.worker:
+            self.worker.running = False
+            if self.worker.loop:
+                self.worker.loop.call_soon_threadsafe(self.worker.loop.stop)
+        self.root.destroy()

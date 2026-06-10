@@ -1,24 +1,24 @@
-;=======================================老登群服专用QMange开始=======================================
+;=======================================典狱长群服专用QMange开始=======================================
 [@OnTimer*指定定时器=117*]
 
 ;刷新NPC
 #IF
 EQUAL *刷新NPC=G10* 1
 #ACT
-Delnpc 老登 SR001
-CreateNPC 老登 SR001 8 8 11 老登 1
+Delnpc 典狱长 SR001
+CreateNPC 典狱长 SR001 8 8 11 典狱长 1
 MOV *刷新NPC=G10* 0
 
 #IF
-GetStringPosEX *认证账号路径=..\..\..\..\问剑通区\老登认证账号2.txt* <$USERID>:<$SERVERNAME> N$认证行 S1
+GetStringPosEX *认证账号路径=..\..\..\..\问剑通区\典狱长认证账号2.txt* <$USERID>:<$SERVERNAME> N$认证行 S1
 #ACT
 TextSplit | <$STR(S1)> s10
-SetranKlevelName %s\※老登群服-<$SERVERNAME>※\绑定QQ号:<$STR(s11)>
-#CALL [\老登功能\老登BUFF.txt] @刷新BUFF
+SetranKlevelName %s\※典狱长群服-<$SERVERNAME>※\绑定QQ号:<$STR(s11)>
+#CALL [\典狱长功能\典狱长BUFF.txt] @刷新BUFF
 BREAK
 
 #ELSESAY
-老登群成员检查未通过\请发送以下信息给管理注册机器人(*指定机器人QQ号=781369990*),等待验证\
+典狱长群成员检查未通过\请发送以下信息给管理注册机器人(*指定机器人QQ号=781369990*),等待验证\
 <复制信息/@@CopyToClipboard1(绑定 <$SERVERNAME> <$USERID>)>绑定 <$SERVERNAME> <$USERID>
 #ELSEACT
 ChangeState 1 10 
@@ -46,11 +46,11 @@ EQUAL *查询角色名=A690* <$USERNAME>
 MOV *查询角色信息=A691* 地图：<$MAP>-坐标：<$X>，<$Y>
 GuildNoticeMsg 255 249 [你已经被人探测！] Self
 
-;=======================================老登群服专用QMange结束=======================================
+;=======================================典狱长群服专用QMange结束=======================================
 
 
 [@Login]
-;=======================================植入@Login=老登Login群服注入开始=======================================
+;=======================================植入@Login=典狱长Login群服注入开始=======================================
 #IF
 ISNEWHUMAN
 #ACT
@@ -60,20 +60,20 @@ mov *CDK数量变量=U10* 0
 #IF
 EQUAL N$安全屋状态 0
 #ACT
-ADDMIRRORMAP B102 SR001 老登安全屋 9999999 0 0 N$安全屋状态 0
+ADDMIRRORMAP B102 SR001 典狱长安全屋 9999999 0 0 N$安全屋状态 0
 
 #if
-FindNpcPoint SR001 老登 N1 N2
+FindNpcPoint SR001 典狱长 N1 N2
 #ELSEACT
-CreateNPC 老登 SR001 8 8 11 老登 1
+CreateNPC 典狱长 SR001 8 8 11 典狱长 1
 
 #IF
 #ACT
 SetMirrorMapTime SR001 9999999 1
-sendmsg 7 点击【帮助】按钮，可以进入老登群服安全屋
+sendmsg 7 点击【帮助】按钮，可以进入典狱长群服安全屋
 SetOnTimer *指定定时器=117* 1
-#CALL [\老登功能\老登BUFF.txt] @刷新BUFF
-sendmsg 7 老登群服福利，暴率翻倍
+#CALL [\典狱长功能\典狱长BUFF.txt] @刷新BUFF
+sendmsg 7 典狱长群服福利，暴率翻倍
 
 ;幽灵状态
 #IF
@@ -82,4 +82,4 @@ CHECK [*幽灵状态标识=99*] 1
 ;清理背包
 Gmexecute 清理背包 self
 SET [*幽灵状态标识=99*] 0
-;=======================================植入@Login=老登Login群服注入结束=======================================
+;=======================================植入@Login=典狱长Login群服注入结束=======================================

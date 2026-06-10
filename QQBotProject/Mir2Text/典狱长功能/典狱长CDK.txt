@@ -1,4 +1,4 @@
-[@老登CDK]
+[@典狱长CDK]
 {
 
 #if
@@ -22,7 +22,7 @@ GIVE 金条
 INC *一天变量* 1
 ;叠加基数
 INC *CDK数量变量* 1
-#CALL [\老登功能\老登BUFF.txt] @刷新BUFF
+#CALL [\典狱长功能\典狱长BUFF.txt] @刷新BUFF
 MESSAGEBOX 成功兑换CDK，获取1根金条，爆率+50%，你已经兑换了<$STR(*CDK数量变量*)>个CDK
 #ELSEACT
 MESSAGEBOX 您的CDK不对,无法兑换
