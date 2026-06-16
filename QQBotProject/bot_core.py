@@ -138,6 +138,29 @@ class BotWorker:
     async def handle_private_message(self, websocket, data):
         sender = data.get("sender", {})
         qq_num = sender.get("user_id")
+
+        # [优化] 私聊回复过滤：仅当开启了“绑定”功能，且发送者是“绑定群”成员时才回复
+        if not self.enable_group_bind:
+            return
+
+        target_bind_group = str(self.enable_bind_group).strip()
+        if not target_bind_group:
+            return
+
+        try:
+            # 尝试获取成员信息，校验是否在绑定群中
+            member_info = await self.call_api(websocket, "get_group_member_info", {
+                "group_id": int(target_bind_group),
+                "user_id": int(qq_num),
+                "no_cache": True
+            })
+            if not member_info:
+                self.log_func(f"👤 私聊过滤: 用户 {qq_num} 不在绑定群 {target_bind_group} 中，已忽略消息。")
+                return
+        except Exception as e:
+            # 如果查询异常（如群号格式错误或网络问题），为保险起见选择不回复
+            self.log_func(f"⚠️ 私聊过滤校验异常: {e}")
+            return
         
         # 优化昵称处理：处理缺失、过滤可能破坏格式的特殊字符
         raw_nickname = sender.get("nickname")
