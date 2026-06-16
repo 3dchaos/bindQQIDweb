@@ -40,9 +40,9 @@ Formulation <$STR(N$诱惑之光等级)>+2 N$诱惑数量
 GetListVarCount L$存宝 N$存宝数量
 
 #IF
-	CHECKGAMEGOLD > 19
+	CHECKGOLD 1000
 	#ELSEACT
-	MESSAGEBOX 你的元宝不够，本服务收费20元宝
+	MESSAGEBOX 你的金币不够，本服务收费1000金币
 	BREAK
 
 #IF
@@ -79,7 +79,7 @@ BREAK
 #IF 
 CHECKSLAVENAME <$NPCINPUT(3)>
 #ACT 
-	GAMEGOLD - 20
+	Take 金币 1000
 	KillCallMob <$NPCINPUT(3)> 1 1
 	INC L$存宝 <$NPCINPUT(3)>
 	MOV *存储宝宝库* <$STR(L$存宝)>

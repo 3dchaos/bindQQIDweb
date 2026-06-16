@@ -20,10 +20,12 @@ DIV N$等级叠加 <$LEVEL> 10
 INC N$真实战速 <$STR(N$等级叠加)>
 DIV N$等级叠加 <$LEVEL> 5
 INC N$真实体魄 <$STR(N$等级叠加)>
-INC N$真实宝宝 <$LEVEL>
+DIV N$等级叠加 <$LEVEL> 2
+INC N$真实宝宝 <$STR(N$等级叠加)>
+;INC N$真实宝宝 <$LEVEL>
 MOV S$战士BUFF文本 攻速+<$STR(N$真实战速)>(等级/10)\
 MOV S$法师BUFF文本 防御+<$STR(N$真实体魄)>(等级/5)\
-MOV S$道士BUFF文本 宝宝属性+<$LEVEL>%(等级)\
+MOV S$道士BUFF文本 宝宝属性+<$LEVEL>%(等级/2)\
 
 ;CDK叠加
 ;卡数X50
@@ -44,9 +46,9 @@ INC N$真实体魄 <$STR(N$CDK叠加)>
 INC S$法师BUFF文本 防御+<$STR(N$CDK叠加)>(CDK数量/2)\
 
 ;卡数X10
-MUL N$CDK叠加 *CDK数量变量* 10
+MUL N$CDK叠加 *CDK数量变量* 2
 INC N$真实宝宝 <$STR(N$CDK叠加)>
-INC S$道士BUFF文本 宝宝属性+<$STR(N$CDK叠加)>%(CDK数量*10)\
+INC S$道士BUFF文本 宝宝属性+<$STR(N$CDK叠加)>%(CDK数量*2)\
 
 ;实现部分
 #IF

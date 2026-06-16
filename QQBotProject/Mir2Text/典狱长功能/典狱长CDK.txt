@@ -13,17 +13,17 @@ LARGE *一天变量=j0* 1
 
 [@InPutString3]
 #if
-CHECKTEXTLIST *CDK未使用=..\..\..\..\问剑通区\比基尼CDK未使用.txt* <$STR(S3)>
+CHECKTEXTLIST *CDK未使用=..\..\..\..\通区\CDK未使用.txt* <$STR(S3)>
 #act
 DelTextList *CDK未使用* <$STR(S3)>
 mov S$领取记录 服务器【<$SERVERNAME>】:账号【<$USERID>】:人物名字【<$USERNAME>】:时间【<$YEAR>年<$MONTH>月<$DAY>日<$HOUR>点<$MINUTE>分】:使用码【<$STR(S3)>】
-AddTextListEx *CDK已使用=..\..\..\..\问剑通区\比基尼CDK已使用.txt <$str(S$领取记录)>*
+AddTextListEx *CDK已使用=..\..\..\..\通区\CDK已使用.txt <$str(S$领取记录)>*
 GIVE 金条
 INC *一天变量* 1
 ;叠加基数
 INC *CDK数量变量* 1
 #CALL [\典狱长功能\典狱长BUFF.txt] @刷新BUFF
-MESSAGEBOX 成功兑换CDK，获取1根金条，爆率+50%，你已经兑换了<$STR(*CDK数量变量*)>个CDK
+MESSAGEBOX 成功兑换CDK，你已经兑换了<$STR(*CDK数量变量*)>个CDK
 #ELSEACT
 MESSAGEBOX 您的CDK不对,无法兑换
 }

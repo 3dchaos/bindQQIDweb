@@ -8,7 +8,8 @@ GOTO @典狱长帮助
 [@典狱长帮助]
 #IF
 #SAY
-;<Text:杀怪爆率：<$KILLMONBURSTRATE>;经验倍率：<$KILLMONEXPRATE>|点击查看计算过程:0:0{FCOLOR=250;FSIZE=10;FNAME=黑体}/@BUFF详情>\ \
+<Text:杀怪爆率：<$KILLMONBURSTRATE>-经验倍率：<$KILLMONEXPRATE>|点击查看计算过程:0:0{FCOLOR=250;FSIZE=10;FNAME=黑体}/@BUFF详情>\ \
+
 <BUFF加成/@BUFF详情>\ \
 <怪物爆率查询/@怪物爆率查询>    <无限仓库/@无限仓库>\
 <极品装备转移/@极品装备转移>    <探测功能/@探测功能>\

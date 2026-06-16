@@ -10,7 +10,7 @@ CreateNPC 典狱长 SR001 8 8 11 典狱长 1
 MOV *刷新NPC=G10* 0
 
 #IF
-GetStringPosEX *认证账号路径=..\..\..\..\问剑通区\典狱长认证账号2.txt* <$USERID>:<$SERVERNAME> N$认证行 S1
+GetStringPosEX *认证账号路径=..\..\..\..\通区\认证账号.txt* <$USERID>:<$SERVERNAME> N$认证行 S1
 #ACT
 TextSplit | <$STR(S1)> s10
 SetranKlevelName %s\※典狱长群服-<$SERVERNAME>※\绑定QQ号:<$STR(s11)>
