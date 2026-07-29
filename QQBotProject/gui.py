@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 import dataset
 import shutil
-import re
+import json
 from data_manager import read_file_data, write_file_data
 from bot_core import BotWorker
 from config import DB_URL, DEFAULT_WS_URL, DEFAULT_BIND_FILE
@@ -391,14 +391,13 @@ class App:
                 self.var_recall_delay.set(conf.get('recall_delay', 3))
 
                 # 加载撤回指令列表
-                import json
                 saved_cmds = conf.get('recall_cmds', "")
                 if saved_cmds:
                     try:
                         cmds_list = json.loads(saved_cmds)
                         for cid, var in self.recall_cmds_vars.items():
                             var.set(cid in cmds_list)
-                    except: pass
+                    except Exception: pass
 
                 self.var_decoder.set(conf.get('enable_decoder', False))
                 self.ent_decoder_group.delete(0, "end")
@@ -420,7 +419,7 @@ class App:
             else:
                 self.ent_url.insert(0, DEFAULT_WS_URL)
                 self.ent_file_path.insert(0, DEFAULT_BIND_FILE)
-        except:
+        except Exception:
             self.ent_url.insert(0, DEFAULT_WS_URL)
             self.ent_file_path.insert(0, DEFAULT_BIND_FILE)
 
@@ -438,19 +437,18 @@ class App:
         recall_delay = self.var_recall_delay.get()
 
         # 获取开启撤回的指令列表
-        import json
         recall_cmds = [cid for cid, var in self.recall_cmds_vars.items() if var.get()]
         recall_cmds_json = json.dumps(recall_cmds)
 
         try:
             max_b = int(self.spin_limit.get())
-        except: max_b = 2
+        except Exception: max_b = 2
         try:
             max_cdk_b = int(self.spin_cdk_limit.get())
-        except: max_cdk_b = 5
+        except Exception: max_cdk_b = 5
         try:
             max_g_cdk = int(self.spin_group_cdk_limit.get())
-        except: max_g_cdk = 100
+        except Exception: max_g_cdk = 100
 
         game_unused = self.ent_unused_path.get().strip()
         game_used = self.ent_used_log_path.get().strip()
@@ -612,7 +610,7 @@ class App:
                     valid_records.append(r)
                 else:
                     removed_count += 1
-            except:
+            except Exception:
                 removed_count += 1
 
         if removed_count > 0:
@@ -638,10 +636,10 @@ class App:
         # 初始同步开关状态
         try:
             self.worker.max_cdk_binds = int(self.spin_cdk_limit.get())
-        except: self.worker.max_cdk_binds = 5
+        except Exception: self.worker.max_cdk_binds = 5
         try:
             self.worker.max_group_cdk = int(self.spin_group_cdk_limit.get())
-        except: self.worker.max_group_cdk = 100
+        except Exception: self.worker.max_group_cdk = 100
 
         self.worker.game_unused_file = self.ent_unused_path.get().strip()
         self.worker.game_used_log_file = self.ent_used_log_path.get().strip()
@@ -689,11 +687,6 @@ class App:
             self.btn_write_implant.config(state="normal")
             self.btn_cleanup.config(state="normal")
             self.save_all_settings()
-
-    def load_game_name_from_ini(self, directory):
-        # 兼容旧逻辑，但现在主要由 browse_version_dir 调用 script_implant
-        name = script_implant.get_game_name(directory, self.log_implant)
-        self.lbl_game_name.config(text=f"游戏名称: {name}")
 
     def check_implant_files(self):
         """检查 Mir2Text 目录下的文件是否存在并更新 UI 颜色"""

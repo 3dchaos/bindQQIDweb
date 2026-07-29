@@ -28,7 +28,7 @@ class GameDataManager:
             ip = s.getsockname()[0]
             s.close()
             return ip
-        except:
+        except Exception:
             return "127.0.0.1"
     
     def kill_port_process(self, port):
@@ -55,7 +55,7 @@ class GameDataManager:
                                 subprocess.run(['taskkill', '/PID', pid, '/F'], 
                                             capture_output=True, shell=True)
                                 return True
-                            except:
+                            except Exception:
                                 pass
             return False
         except Exception as e:
@@ -74,7 +74,7 @@ class GameDataManager:
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-            except:
+            except Exception:
                 return "DefaultServer"
         
         # 查找GameName
@@ -247,7 +247,7 @@ class GameDataManager:
                                 map_name = map_name.split('|')[0]
                             
                             self.map_aliases[map_name] = map_alias
-            except:
+            except Exception:
                 return f"错误: 无法读取文件 {self.map_info_file}"
         
         return f"共解析到 {len(self.map_aliases)} 个地图映射"
@@ -639,7 +639,7 @@ class GameDataManager:
                                 
                             except (ValueError, IndexError):
                                 continue
-            except:
+            except Exception:
                 return "错误: 无法读取MonGen.txt文件"
         
         conn.commit()

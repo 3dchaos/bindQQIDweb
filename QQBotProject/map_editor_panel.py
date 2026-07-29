@@ -1,5 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import webbrowser
+import shutil
+from datetime import datetime
+import re
 import os
 import re
 import chardet
@@ -186,8 +190,7 @@ class MapEditorPanel(ttk.Frame):
         
         # 绑定点击事件
         def open_ad_link(event):
-            import webbrowser
-            webbrowser.open("http://dyzplugin.win/")
+                webbrowser.open("http://dyzplugin.win/")
         
         ad_label.bind("<Button-1>", open_ad_link)
         ad_label.bind("<Enter>", lambda e: ad_label.configure(foreground="blue", cursor="hand2"))
@@ -303,7 +306,7 @@ class MapEditorPanel(ttk.Frame):
                 else:
                     # 如果检测失败，尝试GBK编码
                     return 'gbk'
-        except:
+        except Exception:
             # 如果检测失败，默认使用GBK
             return 'gbk'
     
@@ -360,8 +363,7 @@ class MapEditorPanel(ttk.Frame):
                 remaining_line = line[end_bracket+1:].strip()  # 剩余部分（参数）
                 
                 # 使用正则表达式分割，支持制表符和多个空格
-                import re
-                parts = re.split(r'\s+', map_def.strip())
+                parts = re.split('\s+', map_def.strip())
                 
                 if len(parts) >= 2:
                     map_id = parts[0].strip()
@@ -665,9 +667,7 @@ class MapEditorPanel(ttk.Frame):
     def backup_and_save(self):
         """备份并保存文件（只修改当前编辑的地图）"""
         try:
-            import shutil
-            from datetime import datetime
-            
+                    
             # 创建备份文件名
             backup_dir = os.path.dirname(self.map_info_file)
             backup_name = f"MapInfo_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"

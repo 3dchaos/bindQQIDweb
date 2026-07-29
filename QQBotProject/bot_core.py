@@ -9,7 +9,9 @@ import os
 import binascii
 from Crypto.Cipher import DES
 from data_manager import read_file_data, write_file_data
-from config import DB_URL
+from config import DB_URL, DEFAULT_UNUSED_CDK, DEFAULT_USED_LOG
+import random
+import string
 
 class BotWorker:
     def __init__(self, ws_url, max_binds, log_func, get_filepath_func):
@@ -37,12 +39,8 @@ class BotWorker:
         self.loop = None
         
         # 游戏文本同步路径 (根据目录结构定位)
-        if getattr(sys, 'frozen', False):
-            self.base_dir = os.path.dirname(sys.executable)
-        else:
-            self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.game_unused_file = os.path.join(self.base_dir, "Mir2Text", "典狱长功能", "未使用CDK.txt")
-        self.game_used_log_file = os.path.join(self.base_dir, "Mir2Text", "典狱长功能", "已使用.txt")
+        self.game_unused_file = DEFAULT_UNUSED_CDK
+        self.game_used_log_file = DEFAULT_USED_LOG
         
         # API 异步请求字典
         self.pending_requests = {}
@@ -96,7 +94,7 @@ class BotWorker:
                 # 使用 rsplit 确保取到最后一个冒号后的区名，适配账号含冒号的情况
                 zone = acc_zone.rsplit(':', 1)[-1]
                 if zone in counts: counts[zone] += 1
-            except: pass
+            except Exception: pass
         
         reply = "【🏰 当前开区列表及注册人数】\n"
         if not zones:
@@ -197,7 +195,7 @@ class BotWorker:
                         # 使用 rsplit 适配账号含冒号的情况
                         acc, zone = acc_zone.rsplit(':', 1)
                         found.append(f"账号：{acc} ({zone})")
-                except: pass
+                except Exception: pass
             reply = "【👤 您名下已绑定账号】\n" + ("\n".join(found) if found else "未查询到记录")
             await self.send_private_msg(websocket, qq_num, reply)
             return
@@ -246,7 +244,7 @@ class BotWorker:
                     # 仅统计当前区的绑定数量
                     if p[1] == str(qq_num) and p[0].rsplit(':', 1)[-1] == zone_name:
                         my_binds += 1
-                except: continue
+                except Exception: continue
 
             if account_registered:
                 fail_msg = f"❌ 注册失败：账号【{account}】在【{zone_name}】已被占用！\n\n{zones_list_txt}"
@@ -543,7 +541,7 @@ class BotWorker:
                             # 仅统计当前区的绑定数量
                             if p[1] == str(user_id) and p[0].rsplit(':', 1)[-1] == zone_name:
                                 my_binds += 1
-                        except: continue
+                        except Exception: continue
 
                     if account_registered:
                         fail_msg = f"[CQ:at,qq={user_id}] ❌ 注册失败：账号【{account}】在【{zone_name}】已被占用！\n\n{zones_list_txt}"
@@ -671,7 +669,7 @@ class BotWorker:
                         # 使用 rsplit 适配账号含冒号的情况
                         acc, zone = acc_zone.rsplit(':', 1)
                         found.append(f"账号：{acc} ({zone})")
-                except: pass
+                except Exception: pass
             
             content = "\n".join(found) if found else "未查询到记录"
             reply = f"[CQ:at,qq={user_id}] \n【👤 您名下已绑定账号】\n{content}"
@@ -694,8 +692,6 @@ class BotWorker:
             await self.send_group_msg(websocket, group_id, f"✅ [CQ:at,qq={user_id}] 已将您名下的 {len(my_cdks)} 条 CDK 记录及游戏兑换状态私聊发送给您。", cmd_type="list_my_cdk")
 
         elif cmd_type == "add_cdk":
-            import random
-            import string
             
             qty = cmd_params['qty']
             price = cmd_params['price']
@@ -961,7 +957,7 @@ class BotWorker:
                         acc = acc_zone.rsplit(':', 1)[0]
                         if acc.lower() == account_to_find.lower():
                             found_qqs.append(parts[1])
-                except:
+                except Exception:
                     continue
             
             if not found_qqs:

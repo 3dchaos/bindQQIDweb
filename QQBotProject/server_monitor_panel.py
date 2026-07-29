@@ -637,7 +637,7 @@ class ServerMonitorPanel(ttk.Frame):
             try:
                 self.http_server.shutdown()
                 self.http_server.server_close()
-            except:
+            except Exception:
                 pass
             self.http_server = None
             self.http_server_thread = None

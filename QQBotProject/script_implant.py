@@ -3,6 +3,10 @@ import sys
 import re
 import configparser
 from mir_script_engine import MirScriptEngine
+import traceback
+import random
+import string
+import shutil
 
 def get_base_dir():
     """获取程序运行的基础目录"""
@@ -73,7 +77,7 @@ def get_game_name(version_dir, log_callback=None):
             cp = configparser.ConfigParser()
             try:
                 cp.read(ini_path, encoding="gbk")
-            except:
+            except Exception:
                 cp.read(ini_path, encoding="utf-8")
 
             return cp.get("GameConf", "GameName", fallback="未知")
@@ -152,7 +156,6 @@ def implant_scripts(version_dir, mir_path, user_inputs, log_callback, selected_i
 
     except Exception as e:
         log_callback(f"❌ 注入失败: {e}")
-        import traceback
         log_callback(traceback.format_exc())
         return False
 
@@ -184,9 +187,6 @@ def obfuscate_gm_commands(version_dir, log_callback):
             log_callback("⚠️ 未找到 Command.ini，无法混淆")
             return False
 
-    import random
-    import string
-    import shutil
 
     def get_random_cmd(length=13):
         return "".join(random.choices(string.ascii_letters + string.digits, k=length))

@@ -9,6 +9,7 @@ from tkinter import ttk, filedialog, scrolledtext
 import re
 
 from drop_rate_manager import GameDataManager
+import urllib.request
 from drop_rate_web import app, set_global_db_manager
 
 
@@ -127,7 +128,7 @@ class DropRatePanel(ttk.Frame):
             self.log_text.config(state="disabled")
         try:
             self.winfo_toplevel().after(0, _write)
-        except:
+        except Exception:
             pass
 
     def browse_dir(self):
@@ -223,7 +224,7 @@ class DropRatePanel(ttk.Frame):
         """重新启用初始化按钮（线程安全）"""
         try:
             self.winfo_toplevel().after(0, lambda: self.btn_init.config(state="normal"))
-        except:
+        except Exception:
             pass
 
     def start_server(self):
@@ -276,7 +277,7 @@ class DropRatePanel(ttk.Frame):
                         self.btn_stop.config(state="disabled"),
                         self.btn_browser.config(state="disabled")
                     ))
-                except:
+                except Exception:
                     pass
 
         self.server_thread = threading.Thread(target=_run_flask, daemon=True)
@@ -293,7 +294,6 @@ class DropRatePanel(ttk.Frame):
 
         self.log("正在停止服务器...")
         # 通过 HTTP 请求优雅关闭 Flask 服务器
-        import urllib.request
         try:
             req = urllib.request.Request(f"http://127.0.0.1:{self.port}/shutdown")
             urllib.request.urlopen(req, timeout=3)

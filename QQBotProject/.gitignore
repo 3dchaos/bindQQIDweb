@@ -1,0 +1,20 @@
+# Build artifacts
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Temp
+*.tmp
+__gui_dump.txt
+__dump_*.txt
