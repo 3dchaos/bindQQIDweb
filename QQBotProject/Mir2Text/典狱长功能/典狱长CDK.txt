@@ -24,6 +24,8 @@ INC *一天变量* 1
 INC *CDK数量变量* 1
 #CALL [\典狱长功能\典狱长BUFF.txt] @刷新BUFF
 MESSAGEBOX 成功兑换CDK，你已经兑换了<$STR(*CDK数量变量*)>个CDK
+goto @典狱长CDK
 #ELSEACT
 MESSAGEBOX 您的CDK不对,无法兑换
+goto @典狱长CDK
 }

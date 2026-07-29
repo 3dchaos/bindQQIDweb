@@ -13,7 +13,12 @@ from data_manager import read_file_data, write_file_data
 from bot_core import BotWorker
 from config import DB_URL, DEFAULT_WS_URL, DEFAULT_BIND_FILE
 import script_implant
+from drop_rate_panel import DropRatePanel
+from mon_gen_panel import MonGenPanel
+from map_editor_panel import MapEditorPanel
+from server_monitor_panel import ServerMonitorPanel
 
+# 典狱长官网地址
 OFFICIAL_SITE_URL = "https://dyznb.com/"
 
 class App:
@@ -23,6 +28,11 @@ class App:
         self.root.geometry("1180x800")
         self.root.minsize(1080, 680)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # 启用 tkdnd 拖拽支持（给 MonGen 编辑器用）
+        try:
+            self.root.tk.call("package", "require", "tkdnd")
+        except Exception:
+            pass
 
         self.worker = None
         self.script_vars_entries = {} # 存储变量名和对应的 Entry
@@ -33,183 +43,160 @@ class App:
         self.root.after(800, self.open_official_site)
 
     def setup_ui(self):
-        # --- 顶部：分左右两半 ---
-        top_container = ttk.Frame(self.root)
-        top_container.pack(fill="x", padx=10, pady=5)
+        # 配置分页样式 - 加粗标签、明显描边
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TNotebook", background="#1a1a1a", borderwidth=4, relief="solid")
+        style.configure("TNotebook.Tab",
+                        background="#3a3a3a",
+                        foreground="#dddddd",
+                        padding=[30, 10],
+                        borderwidth=3,
+                        relief="raised",
+                        font=("Microsoft YaHei UI", 12, "bold"))
+        style.map("TNotebook.Tab",
+                  background=[("selected", "#0078d4"), ("active", "#555555")],
+                  foreground=[("selected", "#ffffff"), ("active", "#ffffff")],
+                  relief=[("selected", "sunken")])
+        # 创建主分页控件
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=4)
 
-        # 1. 左侧：连接设置
+        # ===== Tab 1: QQ Robot - 机器人控制面板 =====
+        self.tab_bot = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_bot, text="QQ机器人")
+
+        # --- Top toolbar: Connection + Sync Dirs ---
+        top_container = ttk.Frame(self.tab_bot)
+        top_container.pack(fill="x", padx=8, pady=6)
+
+        # Left: LLOneBot connection
         top_left = ttk.LabelFrame(top_container, text="LLOneBot 连接设置")
-        top_left.pack(side="left", fill="both", expand=True, padx=(0, 5))
-
-        ttk.Label(top_left, text="WS:").pack(side="left", padx=2)
-        self.ent_url = ttk.Entry(top_left, width=30)
+        top_left.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        fl = ttk.Frame(top_left)
+        fl.pack(fill="x", padx=6, pady=4)
+        ttk.Label(fl, text="WS:", font=("", 9, "bold")).pack(side="left", padx=2)
+        self.ent_url = ttk.Entry(fl, width=32)
         self.ent_url.pack(side="left", fill="x", expand=True, padx=2)
-
-        ttk.Label(top_left, text="Token:").pack(side="left", padx=2)
-        self.ent_token = ttk.Entry(top_left, width=10)
+        ttk.Label(fl, text="Token:", font=("", 9, "bold")).pack(side="left", padx=2)
+        self.ent_token = ttk.Entry(fl, width=12)
         self.ent_token.pack(side="left", padx=2)
-
-        self.btn_start = ttk.Button(top_left, text="启动", width=6, command=self.start_bot)
+        self.btn_start = ttk.Button(fl, text="▶ 启动", width=7, command=self.start_bot)
         self.btn_start.pack(side="left", padx=2)
-        self.btn_stop = ttk.Button(top_left, text="停止", width=6, state="disabled", command=self.stop_bot)
+        self.btn_stop = ttk.Button(fl, text="■ 停止", width=7, state="disabled", command=self.stop_bot)
         self.btn_stop.pack(side="left", padx=2)
 
-        # 2. 右侧：同步目录设置
+        # Right: Sync directories
         top_right = ttk.LabelFrame(top_container, text="同步目录设置")
-        top_right.pack(side="left", fill="both", expand=True, padx=(5, 0))
-
-        # 使用 Grid 缩减高度
-        # 私聊注册
-        f1 = ttk.Frame(top_right)
-        f1.pack(fill="x", pady=1)
-        ttk.Label(f1, text="注册:", width=6).pack(side="left")
-        self.ent_file_path = ttk.Entry(f1)
+        top_right.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        fr = ttk.Frame(top_right)
+        fr.pack(fill="x", padx=6, pady=2)
+        ttk.Label(fr, text="注册:", width=6, font=("", 9, "bold")).pack(side="left")
+        self.ent_file_path = ttk.Entry(fr)
         self.ent_file_path.pack(side="left", fill="x", expand=True, padx=2)
-        ttk.Button(f1, text="..", width=3, command=self.browse_file).pack(side="left")
+        ttk.Button(fr, text="浏览", width=5, command=self.browse_file).pack(side="left")
 
-        # 游戏文件 (并排显示)
-        f23 = ttk.Frame(top_right)
-        f23.pack(fill="x", pady=1)
-
-        ttk.Label(f23, text="未使用:", width=6).pack(side="left")
-        self.ent_unused_path = ttk.Entry(f23)
+        fr2 = ttk.Frame(top_right)
+        fr2.pack(fill="x", padx=6, pady=2)
+        ttk.Label(fr2, text="未使用:", width=6, font=("", 9, "bold")).pack(side="left")
+        self.ent_unused_path = ttk.Entry(fr2)
         self.ent_unused_path.pack(side="left", fill="x", expand=True, padx=2)
-        ttk.Button(f23, text="..", width=3, command=self.browse_unused_file).pack(side="left")
-
-        ttk.Label(f23, text="已使用:", width=6).pack(side="left", padx=(5,0))
-        self.ent_used_log_path = ttk.Entry(f23)
+        ttk.Button(fr2, text="浏览", width=5, command=self.browse_unused_file).pack(side="left")
+        ttk.Label(fr2, text="已使用:", width=6, font=("", 9, "bold")).pack(side="left", padx=(8, 0))
+        self.ent_used_log_path = ttk.Entry(fr2)
         self.ent_used_log_path.pack(side="left", fill="x", expand=True, padx=2)
-        ttk.Button(f23, text="..", width=3, command=self.browse_used_log_file).pack(side="left")
+        ttk.Button(fr2, text="浏览", width=5, command=self.browse_used_log_file).pack(side="left")
 
-        # 强制同步按钮
         sync_btn_f = ttk.Frame(top_right)
-        sync_btn_f.pack(fill="x", pady=2)
-        ttk.Button(sync_btn_f, text="📥 日志->DB", command=self.force_sync_text_to_db).pack(side="left", padx=2, expand=True, fill="x")
-        ttk.Button(sync_btn_f, text="📤 DB->未使用", command=self.force_sync_db_to_text).pack(side="left", padx=2, expand=True, fill="x")
-
-        # --- 广告位 ---
-        ad_frame = tk.Frame(self.root, bg="#101820", cursor="hand2", height=58)
-        ad_frame.pack(fill="x", padx=10, pady=(0, 5))
+        sync_btn_f.pack(fill="x", padx=6, pady=2)
+        ttk.Button(sync_btn_f, text="☁ 日志->DB", command=self.force_sync_text_to_db).pack(side="left", padx=2, expand=True, fill="x")
+        ttk.Button(sync_btn_f, text="☁ DB->未使用", command=self.force_sync_db_to_text).pack(side="left", padx=2, expand=True, fill="x")
+        # --- Ad banner ---
+        ad_frame = tk.Frame(self.tab_bot, bg="#101820", cursor="hand2", height=56)
+        ad_frame.pack(fill="x", padx=8, pady=(0, 6))
         ad_frame.pack_propagate(False)
         ad_frame.bind("<Button-1>", lambda event: self.open_official_site())
 
-        ad_title = tk.Label(
-            ad_frame,
-            text="典狱长软件监控网关",
-            bg="#101820",
-            fg="#f2c94c",
-            font=("", 13, "bold"),
-            cursor="hand2"
-        )
-        ad_title.pack(side="left", padx=(14, 10))
+        ad_title = tk.Label(ad_frame, text="⚔ 典狱长软件监控网关", bg="#101820", fg="#f2c94c", font=("Microsoft YaHei UI", 13, "bold"), cursor="hand2")
+        ad_title.pack(side="left", padx=(16, 8))
         ad_title.bind("<Button-1>", lambda event: self.open_official_site())
 
-        ad_text = tk.Label(
-            ad_frame,
-            text="让流氓软件无处遁形 · 守护程序安全",
-            bg="#101820",
-            fg="#f7f7f7",
-            font=("", 10),
-            cursor="hand2"
-        )
+        ad_text = tk.Label(ad_frame, text="让流氓软件无处逍形 · 守护程序安全", bg="#101820", fg="#f0f0f0", font=("Microsoft YaHei UI", 10), cursor="hand2")
         ad_text.pack(side="left")
         ad_text.bind("<Button-1>", lambda event: self.open_official_site())
 
-        ad_link = tk.Label(
-            ad_frame,
-            text="访问官网 dyznb.com",
-            bg="#101820",
-            fg="#8fd3ff",
-            font=("", 10, "underline"),
-            cursor="hand2"
-        )
-        ad_link.pack(side="right", padx=14)
+        ad_link = tk.Label(ad_frame, text="访问官网 dyznb.com →", bg="#101820", fg="#8fd3ff", font=("Microsoft YaHei UI", 10, "underline"), cursor="hand2")
+        ad_link.pack(side="right", padx=16)
         ad_link.bind("<Button-1>", lambda event: self.open_official_site())
 
-        # --- 中间主体 (核心功能区 + 日志) ---
-        mid_frame = ttk.Frame(self.root)
-        mid_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        # --- Main body: split into left (controls) and right (zone mgmt) ---
+        body_frame = ttk.Frame(self.tab_bot)
+        body_frame.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+        body_frame.columnconfigure(0, weight=3)
+        body_frame.columnconfigure(1, weight=2)
+        body_frame.rowconfigure(0, weight=1)
 
-        # 主体改为三段：左侧管理、中间版本工具、右侧日志，避免左侧出现大块空白。
-        mid_frame.columnconfigure(0, weight=0)
-        mid_frame.columnconfigure(1, weight=0)
-        mid_frame.columnconfigure(2, weight=1)
-        mid_frame.rowconfigure(0, weight=1)
+        # ===== Left panel =====
+        left_panel = ttk.Frame(body_frame)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        left_panel.rowconfigure(1, weight=1)
 
-        manage_panel = ttk.Frame(mid_frame)
-        manage_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=5)
-        for i in range(3):
-            manage_panel.columnconfigure(i, weight=1, uniform="manage")
-        manage_panel.rowconfigure(1, weight=1)
+        # Row 0: Limits + Switches + Recall (horizontal)
+        row1 = ttk.Frame(left_panel)
+        row1.pack(fill="x", pady=(0, 6))
 
-        # --- 第一列：上限控制 ---
-        col1 = ttk.Frame(manage_panel)
-        col1.grid(row=0, column=0, sticky="new", padx=(0, 4))
-
-        limit_box = ttk.LabelFrame(col1, text="上限控制")
-        limit_box.pack(fill="x", pady=5)
-
+        # --- Limits ---
+        limit_f = ttk.LabelFrame(row1, text="上限控制")
+        limit_f.pack(side="left", fill="y", padx=(0, 3))
         for text, spin_attr, val_range in [
             ("QQ注册上限:", "spin_limit", (1, 100)),
-            ("CDK购上限:", "spin_cdk_limit", (1, 100)),
+            ("CDK购买上限:", "spin_cdk_limit", (1, 100)),
             ("群CDK容量:", "spin_group_cdk_limit", (1, 1000))
         ]:
-            f = ttk.Frame(limit_box)
-            f.pack(fill="x", padx=5, pady=2)
-            ttk.Label(f, text=text).pack(side="left")
-            setattr(self, spin_attr, tk.Spinbox(f, from_=val_range[0], to=val_range[1], width=5))
-            getattr(self, spin_attr).pack(side="right", padx=5)
+            f = ttk.Frame(limit_f)
+            f.pack(fill="x", padx=6, pady=2)
+            ttk.Label(f, text=text, font=("", 9)).pack(side="left")
+            setattr(self, spin_attr, tk.Spinbox(f, from_=val_range[0], to=val_range[1], width=6, font=("Consolas", 9)))
+            getattr(self, spin_attr).pack(side="right", padx=2)
+        ttk.Button(limit_f, text="💾 保存上限", command=self.save_all_settings).pack(fill="x", padx=6, pady=4)
 
-        ttk.Button(limit_box, text="💾 保存所有上限", command=self.save_all_settings).pack(fill="x", padx=5, pady=5)
-        ttk.Button(col1, text="🔃 刷新文本数据", command=self.load_data).pack(fill="x", pady=5)
-
-        # --- 第二列：功能开关 ---
-        col2 = ttk.Frame(manage_panel)
-        col2.grid(row=0, column=1, sticky="new", padx=4)
-
-        grp_f = ttk.LabelFrame(col2, text="群功能开关")
-        grp_f.pack(fill="x", pady=5)
-
+        # --- Group switches ---
+        grp_f = ttk.LabelFrame(row1, text="群功能开关")
+        grp_f.pack(side="left", fill="y", padx=3)
         switches = [
-            ("开启群管理", "var_manage"),
-            ("开启群签到", "var_checkin"),
+            ("群管理", "var_manage"),
+            ("群签到", "var_checkin"),
             ("巡逻(自动踢黑)", "var_patrol"),
             ("自动进群", "var_auto_join"),
             ("自动同意好友", "var_auto_friend")
         ]
         for text, var_attr in switches:
             setattr(self, var_attr, tk.BooleanVar(value=False))
-            ttk.Checkbutton(grp_f, text=text, variable=getattr(self, var_attr), command=self.update_bot_flags).pack(anchor="w", padx=5)
+            ttk.Checkbutton(grp_f, text=text, variable=getattr(self, var_attr), command=self.update_bot_flags).pack(anchor="w", padx=6, pady=1)
 
-        # 解码/绑定
+        # Decoder/Bind row
         for text, var_attr, ent_attr in [("解码", "var_decoder", "ent_decoder_group"), ("绑定", "var_group_bind", "ent_bind_group")]:
             setattr(self, var_attr, tk.BooleanVar(value=False))
             f = ttk.Frame(grp_f)
-            f.pack(fill="x", padx=5, pady=1)
+            f.pack(fill="x", padx=6, pady=1)
             ttk.Checkbutton(f, text=text, variable=getattr(self, var_attr), command=self.update_bot_flags).pack(side="left")
-            setattr(self, ent_attr, ttk.Entry(f, width=10))
+            setattr(self, ent_attr, ttk.Entry(f, width=12))
             getattr(self, ent_attr).pack(side="right", padx=2)
 
-        # --- 第三列：撤回 & 区服 ---
-        col3 = ttk.Frame(manage_panel)
-        col3.grid(row=0, column=2, sticky="new", padx=(4, 0))
-
-        recall_f = ttk.LabelFrame(col3, text="撤回设置")
-        recall_f.pack(fill="x", pady=5)
-
+        # --- Recall settings ---
+        recall_f = ttk.LabelFrame(row1, text="撤回设置")
+        recall_f.pack(side="left", fill="y", padx=(3, 0))
         self.var_auto_recall = tk.BooleanVar(value=False)
         self.var_recall_delay = tk.IntVar(value=3)
         self.recall_cmds_vars = {}
-
         rc_top = ttk.Frame(recall_f)
-        rc_top.pack(fill="x", padx=5, pady=2)
-        ttk.Checkbutton(rc_top, text="自动", variable=self.var_auto_recall, command=self.update_bot_flags).pack(side="left")
-        tk.Spinbox(rc_top, from_=1, to=60, width=3, textvariable=self.var_recall_delay, command=self.update_bot_flags).pack(side="left", padx=2)
+        rc_top.pack(fill="x", padx=6, pady=2)
+        ttk.Checkbutton(rc_top, text="自动撤回", variable=self.var_auto_recall, command=self.update_bot_flags).pack(side="left")
+        ttk.Label(rc_top, text="延迟").pack(side="left", padx=(8, 2))
+        tk.Spinbox(rc_top, from_=1, to=60, width=4, textvariable=self.var_recall_delay, command=self.update_bot_flags).pack(side="left")
         ttk.Label(rc_top, text="秒").pack(side="left")
-
-        # 指令选择 (精简版)
         self.recall_cmds_frame = ttk.Frame(recall_f)
-        self.recall_cmds_frame.pack(fill="x", padx=2)
+        self.recall_cmds_frame.pack(fill="x", padx=6, pady=2)
         commands = [
             ("menu", "菜单"), ("checkin", "签到"), ("points", "积分"),
             ("buy_cdk", "购CDK"), ("list_my_cdk", "我的CDK"), ("list_zones", "区表"),
@@ -218,76 +205,118 @@ class App:
         for i, (cid, cname) in enumerate(commands):
             var = tk.BooleanVar(value=True)
             self.recall_cmds_vars[cid] = var
-            ttk.Checkbutton(self.recall_cmds_frame, text=cname, variable=var, command=self.update_bot_flags).grid(row=i//2, column=i%2, sticky="w")
+            ttk.Checkbutton(self.recall_cmds_frame, text=cname, variable=var, command=self.update_bot_flags).grid(row=i//4, column=i%4, sticky="w", padx=2)
 
-        # 区服管理横向铺满左侧下半区，填掉原本空着的区域。
-        zone_f = ttk.LabelFrame(manage_panel, text="区服管理")
-        zone_f.grid(row=1, column=0, columnspan=3, sticky="nsew", pady=(4, 0))
-        zone_f.rowconfigure(0, weight=1)
-        zone_f.columnconfigure(0, weight=1)
-        self.list_zones = tk.Listbox(zone_f, height=12)
-        self.list_zones.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=2)
-        self.ent_new_zone = ttk.Entry(zone_f)
-        self.ent_new_zone.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5)
-        btn_f = ttk.Frame(zone_f)
-        btn_f.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(2, 5))
-        ttk.Button(btn_f, text="+", width=3, command=self.add_zone).pack(side="left", padx=5)
-        ttk.Button(btn_f, text="-", width=3, command=self.del_zone).pack(side="left")
-        ttk.Button(btn_f, text="扫", width=3, command=self.cleanup_records).pack(side="right", padx=5)
+        # ===== Right panel: Zone management =====
+        right_panel = ttk.LabelFrame(body_frame, text="区服管理")
+        right_panel.grid(row=0, column=1, sticky="nsew")
+        right_panel.rowconfigure(0, weight=1)
+        right_panel.columnconfigure(0, weight=1)
 
-        # --- 第四列：版本植入 ---
-        col4 = ttk.Frame(mid_frame, width=260)
-        col4.grid(row=0, column=1, sticky="nsew", padx=(0, 6), pady=5)
-        col4.grid_propagate(False)
-        col4.rowconfigure(0, weight=1)
-        col4.columnconfigure(0, weight=1)
+        self.list_zones = tk.Listbox(right_panel, font=("Consolas", 10), selectbackground="#1a6b3c")
+        self.list_zones.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=6, pady=4)
 
-        implant_f = ttk.LabelFrame(col4, text="版本植入")
-        implant_f.grid(row=0, column=0, sticky="nsew")
+        self.ent_new_zone = ttk.Entry(right_panel, font=("", 10))
+        self.ent_new_zone.grid(row=1, column=0, columnspan=4, sticky="ew", padx=6, pady=2)
 
+        btn_f = ttk.Frame(right_panel)
+        btn_f.grid(row=2, column=0, columnspan=4, sticky="ew", padx=6, pady=4)
+        ttk.Button(btn_f, text="➕ 添加", width=7, command=self.add_zone).pack(side="left", padx=1)
+        ttk.Button(btn_f, text="➖ 删除", width=7, command=self.del_zone).pack(side="left", padx=1)
+        ttk.Button(btn_f, text="🗑 扫无效", width=8, command=self.cleanup_records).pack(side="right", padx=1)
+        ttk.Button(btn_f, text="🔄 刷新", width=7, command=self.load_data).pack(side="right", padx=1)
+
+        # --- Bottom: Running log ---
+        log_frame = ttk.LabelFrame(body_frame, text="运行日志")
+        log_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+        log_frame.rowconfigure(0, weight=1)
+        log_frame.columnconfigure(0, weight=1)
+        self.txt_log = scrolledtext.ScrolledText(log_frame, state="disabled", height=8, font=("Consolas", 10), bg="#1e1e1e", fg="#d4d4d4", insertbackground="white")
+        self.txt_log.grid(row=0, column=0, sticky="nsew", padx=6, pady=4)
+# ===== Tab 2: Version Management - 版本植入与安全清理 =====
+        self.tab_version = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_version, text="版本管理")
+        self.tab_version.columnconfigure(0, weight=1)
+        self.tab_version.rowconfigure(0, weight=3)
+        self.tab_version.rowconfigure(1, weight=2)
+
+        # ===== Upper section: Version implant =====
+        implant_main = ttk.LabelFrame(self.tab_version, text="版本植入")
+        implant_main.grid(row=0, column=0, sticky="nsew", pady=(4, 2), padx=4)
+        implant_main.columnconfigure(0, weight=0, minsize=280)
+        implant_main.columnconfigure(1, weight=1)
+        implant_main.rowconfigure(0, weight=1)
+
+        # Left panel: Implant controls
+        implant_left = ttk.Frame(implant_main)
+        implant_left.grid(row=0, column=0, sticky="nsew", padx=(4, 2), pady=4)
+        implant_left.columnconfigure(0, weight=1)
+
+        # Template checkbox row
+        tmpl_f = ttk.LabelFrame(implant_left, text="选择模板")
+        tmpl_f.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.implant_vars = {}
         self.implant_checks = {}
-        f_status = ttk.Frame(implant_f)
-        f_status.pack(fill="x")
-        for name, fname in [("QF", "QF.txt"), ("QM", "QM.txt"), ("NPC", "典狱长.txt"), ("功能", "典狱长功能")]:
+        tmpl_row = ttk.Frame(tmpl_f)
+        tmpl_row.pack(fill="x", padx=6, pady=4)
+        for name, fname in [("QF闯关", "QF.txt"), ("QM命令", "QM.txt"), ("NPC对话", "典狱长.txt"), ("功能脚本", "典狱长功能")]:
             var = tk.BooleanVar(value=True)
             self.implant_vars[name] = var
-            chk = tk.Checkbutton(f_status, text=name, variable=var, width=4, fg="white", bg="grey", font=("", 8), selectcolor="#444444")
-            chk.pack(side="left", padx=1, pady=1)
+            chk = tk.Checkbutton(tmpl_row, text=name, variable=var,
+                                  fg="white", bg="#555555",
+                                  selectcolor="#444444",
+                                  font=("Microsoft YaHei UI", 9, "bold"),
+                                  indicatoron=0, width=10, padx=2, pady=1)
+            chk.pack(side="left", padx=2)
             self.implant_checks[name] = (chk, fname)
 
-        ttk.Button(implant_f, text="刷新变量", command=self.refresh_script_variables).pack(fill="x", padx=5, pady=2)
+        # Variable refresh and list
+        ttk.Button(implant_left, text="🔄 刷新变量", command=self.refresh_script_variables).grid(row=1, column=0, sticky="ew", pady=2)
 
-        # 变量列表容器
-        var_list_f = ttk.LabelFrame(implant_f, text="注入变量")
-        var_list_f.pack(fill="both", expand=True, padx=5, pady=2)
-
-        self.canvas_vars = tk.Canvas(var_list_f, width=210, height=220, highlightthickness=0)
+        var_list_f = ttk.LabelFrame(implant_left, text="注入变量")
+        var_list_f.grid(row=2, column=0, sticky="nsew", pady=2)
+        var_list_f.rowconfigure(0, weight=1)
+        var_list_f.columnconfigure(0, weight=1)
+        self.canvas_vars = tk.Canvas(var_list_f, highlightthickness=0, bg="#2b2b2b")
         self.scrollbar_vars = ttk.Scrollbar(var_list_f, orient="vertical", command=self.canvas_vars.yview)
         self.scrollable_vars_frame = ttk.Frame(self.canvas_vars)
-
-        self.scrollable_vars_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas_vars.configure(scrollregion=self.canvas_vars.bbox("all"))
-        )
-
+        self.scrollable_vars_frame.bind("<Configure>", lambda e: self.canvas_vars.configure(scrollregion=self.canvas_vars.bbox("all")))
         self.canvas_vars.create_window((0, 0), window=self.scrollable_vars_frame, anchor="nw")
         self.canvas_vars.configure(yscrollcommand=self.scrollbar_vars.set)
+        self.canvas_vars.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar_vars.grid(row=0, column=1, sticky="ns")
 
-        self.canvas_vars.pack(side="left", fill="both", expand=True)
-        self.scrollbar_vars.pack(side="right", fill="y")
+        # Version directory selection
+        dir_f = ttk.LabelFrame(implant_left, text="版本目录")
+        dir_f.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        dir_f.columnconfigure(0, weight=1)
+        self.ent_version_dir = ttk.Entry(dir_f, font=("Consolas", 9))
+        self.ent_version_dir.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
+        ttk.Button(dir_f, text="📁 选择版本目录", command=self.browse_version_dir).grid(row=1, column=0, sticky="ew", padx=6, pady=2)
+        self.lbl_game_name = ttk.Label(dir_f, text="游戏: 未知", font=("Microsoft YaHei UI", 10, "bold"), foreground="#2a7a3a")
+        self.lbl_game_name.grid(row=2, column=0, sticky="w", padx=6, pady=(0, 4))
+        self.btn_write_implant = ttk.Button(dir_f, text="⚡ 写入功能", state="disabled", command=self.write_implant_function)
+        self.btn_write_implant.grid(row=3, column=0, sticky="ew", padx=6, pady=(0, 4))
 
-        self.ent_version_dir = ttk.Entry(implant_f, width=12)
-        self.ent_version_dir.pack(fill="x", padx=5, pady=2)
-        ttk.Button(implant_f, text="选择版本目录", command=self.browse_version_dir).pack(fill="x", padx=5)
-        self.lbl_game_name = ttk.Label(implant_f, text="游戏: 未知", font=("", 9), foreground="blue")
-        self.lbl_game_name.pack(padx=5)
-        self.btn_write_implant = ttk.Button(implant_f, text="写入功能", state="disabled", command=self.write_implant_function)
-        self.btn_write_implant.pack(fill="x", padx=5, pady=2)
+        # Right panel: Implant running log
+        log_implant_f = ttk.LabelFrame(implant_main, text="版本植入运行日志")
+        log_implant_f.grid(row=0, column=1, sticky="nsew", padx=(2, 4), pady=4)
+        log_implant_f.rowconfigure(0, weight=1)
+        log_implant_f.columnconfigure(0, weight=1)
+        self.txt_implant_log = scrolledtext.ScrolledText(log_implant_f, state="disabled",
+                                                          font=("Consolas", 10),
+                                                          bg="#1e1e1e", fg="#d4d4d4",
+                                                          insertbackground="white")
+        self.txt_implant_log.grid(row=0, column=0, sticky="nsew", padx=6, pady=4)
 
-        # 安全清理
-        clean_f = ttk.LabelFrame(implant_f, text="安全清理")
-        clean_f.pack(fill="x", padx=5, pady=5)
+        # ===== Lower section: Security cleanup =====
+        clean_f = ttk.LabelFrame(self.tab_version, text="安全清理")
+        clean_f.grid(row=1, column=0, sticky="nsew", pady=(2, 4), padx=4)
+        clean_f.columnconfigure(0, weight=1)
+
+        clean_top = ttk.Frame(clean_f)
+        clean_top.pack(fill="x", padx=8, pady=6)
+
         self.clean_vars = {
             "obfuscate": tk.BooleanVar(value=False),
             "suspicious": tk.BooleanVar(value=False),
@@ -295,27 +324,46 @@ class App:
             "custom_cmds": tk.BooleanVar(value=False),
             "trade_intercept": tk.BooleanVar(value=False)
         }
-
-        cleanup_options = [
+        for cid, cname in [
             ("obfuscate", "混淆GM命令"),
             ("suspicious", "嫌疑脚本清理"),
             ("gm_list", "清理GM列表"),
             ("custom_cmds", "清除自定义命令"),
             ("trade_intercept", "角色交易拦截")
-        ]
+        ]:
+            chk = ttk.Checkbutton(clean_top, text=cname, variable=self.clean_vars[cid])
+            chk.pack(side="left", padx=6)
 
-        for i, (cid, cname) in enumerate(cleanup_options):
-            chk = ttk.Checkbutton(clean_f, text=cname, variable=self.clean_vars[cid])
-            chk.grid(row=i//2, column=i%2, sticky="w", padx=2, pady=1)
+        clean_bottom = ttk.Frame(clean_f)
+        clean_bottom.pack(fill="x", padx=8, pady=(0, 6))
+        self.btn_cleanup = ttk.Button(clean_bottom, text="🧹 清除后门", state="disabled",
+                                      command=self.cleanup_backdoors, width=20)
+        self.btn_cleanup.pack(side="left", padx=2)
+        ttk.Button(clean_bottom, text="🔄 刷新变量", command=self.refresh_script_variables, width=18).pack(side="left", padx=2)
 
-        self.btn_cleanup = ttk.Button(clean_f, text="清除后门", state="disabled", command=self.cleanup_backdoors)
-        self.btn_cleanup.grid(row=(len(cleanup_options)+1)//2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        # ===== Tab 3: 爆率查询 =====
+        self.tab_drop = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_drop, text="爆率查询")
+        self.drop_panel = DropRatePanel(self.tab_drop)
+        self.drop_panel.pack(fill="both", expand=True)
 
-        # --- 第五列：运行日志 (占用剩余所有空间) ---
-        log_frame = ttk.LabelFrame(mid_frame, text="运行日志")
-        log_frame.grid(row=0, column=2, sticky="nsew", pady=5)
-        self.txt_log = scrolledtext.ScrolledText(log_frame, state="disabled", width=40, font=("Consolas", 9))
-        self.txt_log.pack(fill="both", expand=True, padx=5, pady=5)
+        # ===== Tab 4: MonGen 编辑器 =====
+        self.tab_mongen = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_mongen, text="MonGen刷怪编辑器")
+        self.mon_gen_panel = MonGenPanel(self.tab_mongen)
+        self.mon_gen_panel.pack(fill="both", expand=True)
+
+        # ===== Tab 5: 地图属性管理 =====
+        self.tab_map = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_map, text="地图属性")
+        self.map_editor_panel = MapEditorPanel(self.tab_map)
+        self.map_editor_panel.pack(fill="both", expand=True)
+
+        # ===== Tab 6: 人数监控 =====
+        self.tab_monitor = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_monitor, text="人数监控")
+        self.monitor_panel = ServerMonitorPanel(self.tab_monitor)
+        self.monitor_panel.pack(fill="both", expand=True)
 
     def load_config_from_db(self):
         try:
@@ -433,7 +481,7 @@ class App:
                 max_group_cdk=max_g_cdk
             ), ['id'])
         except Exception as e:
-            self.log(f"保存配置异常: {e}")
+            self.log_implant(f"保存配置异常: {e}")
 
         # 如果 Worker 正在运行，同步更新其参数
         if self.worker:
@@ -454,7 +502,7 @@ class App:
             self.worker.enable_decoder_group = self.ent_decoder_group.get().strip()
             self.worker.enable_group_bind = self.var_group_bind.get()
             self.worker.enable_bind_group = self.ent_bind_group.get().strip()
-            self.log(f"系统: 配置已同步 (QQ上限: {max_b}, CDK上限: {max_cdk_b}, 群容量: {max_g_cdk})")
+            self.log_implant(f"系统: 配置已同步 (QQ上限: {max_b}, CDK上限: {max_cdk_b}, 群容量: {max_g_cdk})")
 
     def update_bot_flags(self):
         self.save_all_settings()
@@ -509,15 +557,25 @@ class App:
             self.txt_log.config(state="disabled")
         self.root.after(0, _write)
 
+    def log_implant(self, text):
+        """Write log to the version management page's running log window"""
+        def _write():
+            if hasattr(self, 'txt_implant_log'):
+                self.txt_implant_log.config(state="normal")
+                self.txt_implant_log.insert("end", text + "\n")
+                self.txt_implant_log.see("end")
+                self.txt_implant_log.config(state="disabled")
+        self.root.after(0, _write)
+
     def load_data(self):
         path = self.get_current_file()
         if not os.path.exists(path):
-            self.log(f"提示: 文件不存在，将会在首次记录时创建: {path}")
+            self.log_implant(f"提示: 文件不存在，将会在首次记录时创建: {path}")
             return
         self.list_zones.delete(0, "end")
         zones, recs = read_file_data(path)
         for z in zones: self.list_zones.insert("end", z)
-        self.log(f"系统: 已加载 {len(zones)} 个区服，{len(recs)} 条记录")
+        self.log_implant(f"系统: 已加载 {len(zones)} 个区服，{len(recs)} 条记录")
 
     def sync_to_file(self):
         path = self.get_current_file()
@@ -559,7 +617,7 @@ class App:
 
         if removed_count > 0:
             if write_file_data(path, zones, valid_records):
-                self.log(f"清理完成: 已删除 {removed_count} 条失效注册记录 (所属区服不在列表中)")
+                self.log_implant(f"清理完成: 已删除 {removed_count} 条失效注册记录 (所属区服不在列表中)")
                 self.load_data()
             else:
                 self.log("❌ 清理失败: 无法写入文件")
@@ -626,7 +684,7 @@ class App:
         if directory:
             self.ent_version_dir.delete(0, "end")
             self.ent_version_dir.insert(0, directory)
-            name = script_implant.get_game_name(directory, self.log)
+            name = script_implant.get_game_name(directory, self.log_implant)
             self.lbl_game_name.config(text=f"游戏名称: {name}")
             self.btn_write_implant.config(state="normal")
             self.btn_cleanup.config(state="normal")
@@ -634,7 +692,7 @@ class App:
 
     def load_game_name_from_ini(self, directory):
         # 兼容旧逻辑，但现在主要由 browse_version_dir 调用 script_implant
-        name = script_implant.get_game_name(directory, self.log)
+        name = script_implant.get_game_name(directory, self.log_implant)
         self.lbl_game_name.config(text=f"游戏名称: {name}")
 
     def check_implant_files(self):
@@ -657,7 +715,7 @@ class App:
         """扫描所有模板文件并提取变量显示在 UI 上 (去重处理)"""
         self.check_implant_files()
         mir_path = script_implant.get_mir_path()
-        unified_vars = script_implant.get_unified_variables(mir_path, self.log)
+        unified_vars = script_implant.get_unified_variables(mir_path, self.log_implant)
 
         self.script_vars_entries.clear()
         for widget in self.scrollable_vars_frame.winfo_children():
@@ -677,7 +735,7 @@ class App:
                 ent.pack(side="right", padx=2, fill="x", expand=True)
                 self.script_vars_entries[var_name] = ent
 
-        self.log(f"系统: 已提取并去重 {len(unified_vars)} 个模板变量")
+        self.log_implant(f"系统: 已提取并去重 {len(unified_vars)} 个模板变量")
 
     def write_implant_function(self):
         """执行脚本注入逻辑"""
@@ -697,7 +755,7 @@ class App:
         user_inputs = {name: ent.get().strip() for name, ent in self.script_vars_entries.items()}
         mir_path = script_implant.get_mir_path()
 
-        if script_implant.implant_scripts(version_dir, mir_path, user_inputs, self.log, selected_items):
+        if script_implant.implant_scripts(version_dir, mir_path, user_inputs, self.log_implant, selected_items):
             messagebox.showinfo("完成", "版本功能植入已完成！")
         else:
             messagebox.showerror("错误", "注入过程中发生异常，请查看日志")
@@ -717,16 +775,16 @@ class App:
         if not messagebox.askyesno("确认", f"确定要执行安全清理吗？(已选 {len(selected_cleans)} 项)\n\n❗ 注意：请在【关闭引擎】情况下执行，或执行完毕后【重启引擎】以生效。"):
             return
 
-        self.log(f"系统: 开始执行安全清理...")
+        self.log_implant(f"系统: 开始执行安全清理...")
 
         success_count = 0
         if self.clean_vars["obfuscate"].get():
-            if script_implant.obfuscate_gm_commands(version_dir, self.log):
+            if script_implant.obfuscate_gm_commands(version_dir, self.log_implant):
                 success_count += 1
 
         if self.clean_vars["suspicious"].get():
             # 特殊处理：弹出交互窗口
-            suspicious_results = script_implant.scan_for_suspicious_segments(version_dir, self.log)
+            suspicious_results = script_implant.scan_for_suspicious_segments(version_dir, self.log_implant)
             if suspicious_results:
                 self.show_suspicious_cleanup_dialog(suspicious_results)
                 success_count += 1
@@ -735,18 +793,18 @@ class App:
                 success_count += 1 # 没扫到也算某种意义上的成功
 
         if self.clean_vars["gm_list"].get():
-            if script_implant.clear_gm_list(version_dir, self.log):
+            if script_implant.clear_gm_list(version_dir, self.log_implant):
                 success_count += 1
 
         if self.clean_vars["custom_cmds"].get():
-            if script_implant.clear_custom_commands(version_dir, self.log):
+            if script_implant.clear_custom_commands(version_dir, self.log_implant):
                 success_count += 1
 
         if self.clean_vars["trade_intercept"].get():
-            if script_implant.intercept_role_trade(version_dir, self.log):
+            if script_implant.intercept_role_trade(version_dir, self.log_implant):
                 success_count += 1
 
-        self.log(f"系统: 安全清理任务执行完毕，成功完成 {success_count}/{len(selected_cleans)} 项。")
+        self.log_implant(f"系统: 安全清理任务执行完毕，成功完成 {success_count}/{len(selected_cleans)} 项。")
         messagebox.showinfo("完成", f"安全清理任务执行完毕！\n成功完成 {success_count} 项操作。")
 
     def show_suspicious_cleanup_dialog(self, results):
@@ -812,7 +870,7 @@ class App:
                 return
 
             if messagebox.askyesno("确认删除", f"确定要从脚本中永久删除选中的 {len(to_delete)} 处代码吗？"):
-                count = script_implant.delete_script_segments(to_delete, self.log)
+                count = script_implant.delete_script_segments(to_delete, self.log_implant)
                 messagebox.showinfo("完成", f"已成功删除 {count} 处嫌疑代码段！")
                 dialog.destroy()
 
@@ -855,14 +913,14 @@ class App:
         for command in editors:
             try:
                 subprocess.Popen(command)
-                self.log(f"已打开文本: {file_path} (行 {line_no})")
+                self.log_implant(f"已打开文本: {file_path} (行 {line_no})")
                 return
             except Exception as e:
-                self.log(f"打开编辑器失败，尝试下一个: {e}")
+                self.log_implant(f"打开编辑器失败，尝试下一个: {e}")
 
         try:
             os.startfile(file_path)
-            self.log(f"已用默认程序打开文本: {file_path}。当前默认编辑器不支持自动跳转到第 {line_no} 行。")
+            self.log_implant(f"已用默认程序打开文本: {file_path}。当前默认编辑器不支持自动跳转到第 {line_no} 行。")
         except Exception as e:
             messagebox.showerror("错误", f"打开文本失败: {e}")
 
@@ -871,7 +929,7 @@ class App:
         try:
             webbrowser.open(OFFICIAL_SITE_URL, new=2)
         except Exception as e:
-            self.log(f"打开官网失败: {e}")
+            self.log_implant(f"打开官网失败: {e}")
 
     def on_close(self):
         """关闭程序前打开官网。"""
