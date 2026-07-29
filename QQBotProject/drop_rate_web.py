@@ -1,4 +1,4 @@
-﻿import html
+import html
 import sqlite3
 from urllib.parse import quote
 from flask import Flask, jsonify, request
@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 global_db_manager = None
 global_db_managers = {}
 global_server_entries = []
+global_fuzzy_drop_rate = False
 
 
 def _manager_name(db_manager):
@@ -49,6 +50,15 @@ def set_global_db_managers(db_managers):
 def get_registered_servers():
     """返回已注册服务端列表，供 GUI 打开指定路由。"""
     return list(global_server_entries)
+
+def set_global_fuzzy_drop_rate(enabled):
+    # GUI controls the fuzzy drop-rate display mode.
+    global global_fuzzy_drop_rate
+    global_fuzzy_drop_rate = bool(enabled)
+
+
+def is_fuzzy_drop_rate_enabled():
+    return global_fuzzy_drop_rate
 
 
 def get_db_manager(server_key=None):
@@ -172,7 +182,6 @@ def render_query_page(server_key=None, db_manager=None):
         .back-link:hover {
             text-decoration: underline;
         }
-        
         .ad-banner {
             margin-top: 15px;
             padding: 10px 20px;
@@ -322,6 +331,7 @@ def render_query_page(server_key=None, db_manager=None):
             cursor: pointer;
             transition: all 0.3s ease;
             border: 2px solid transparent;
+            border-left-width: 5px;
         }
         
         .detail-item:hover {
@@ -343,13 +353,31 @@ def render_query_page(server_key=None, db_manager=None):
         }
         
         .probability {
-            background: #28a745;
-            color: white;
+            display: inline-flex;
+            align-items: center;
+            background: #e9ecef;
+            color: #111827;
             padding: 2px 8px;
             border-radius: 12px;
             font-size: 12px;
+            font-weight: 700;
             margin-left: 10px;
+            border: 1px solid transparent;
         }
+
+        .detail-item.drop-tier-white { background: #ffffff; border-left-color: #ffffff; box-shadow: inset 0 0 0 1px #d1d5db; }
+        .detail-item.drop-tier-blue { background: #eff6ff; border-left-color: #3b82f6; }
+        .detail-item.drop-tier-green { background: #f0fdf4; border-left-color: #22c55e; }
+        .detail-item.drop-tier-yellow { background: #fefce8; border-left-color: #eab308; }
+        .detail-item.drop-tier-orange { background: #fff7ed; border-left-color: #f97316; }
+        .detail-item.drop-tier-red { background: #fef2f2; border-left-color: #ef4444; }
+
+        .probability.drop-tier-white { background: #ffffff; color: #111827; border-color: #d1d5db; }
+        .probability.drop-tier-blue { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+        .probability.drop-tier-green { background: #dcfce7; color: #15803d; border-color: #86efac; }
+        .probability.drop-tier-yellow { background: #fef9c3; color: #a16207; border-color: #fde68a; }
+        .probability.drop-tier-orange { background: #ffedd5; color: #c2410c; border-color: #fdba74; }
+        .probability.drop-tier-red { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
         
         .loading {
             text-align: center;
@@ -449,6 +477,70 @@ def render_query_page(server_key=None, db_manager=None):
         let monsters = [];
         let items = [];
         const API_BASE = '__API_BASE__';
+        const DROP_TIER_LABELS = ['闭眼白送', '烂大街货', '轻轻松松', '人手一份', '得费点劲', '欧皇降临'];
+        const DROP_TIER_CLASSES = ['drop-tier-white', 'drop-tier-blue', 'drop-tier-green', 'drop-tier-yellow', 'drop-tier-orange', 'drop-tier-red'];
+        const DROP_TIER_THRESHOLDS = [0.5, 0.2, 0.05, 0.01, 0.002];
+        let fuzzyDropRate = __FUZZY_DROP_RATE__;
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function getDropChance(item) {
+            const numerator = Number(item.rate_numerator ?? item.rateNumerator ?? 0);
+            const denominator = Number(item.rate_denominator ?? item.rateDenominator ?? 0);
+            return denominator > 0 ? numerator / denominator : 0;
+        }
+
+        function getDropTierIndex(item) {
+            const chance = getDropChance(item);
+            for (let i = 0; i < DROP_TIER_THRESHOLDS.length; i++) {
+                if (chance >= DROP_TIER_THRESHOLDS[i]) {
+                    return i;
+                }
+            }
+            return DROP_TIER_CLASSES.length - 1;
+        }
+
+        function getDropTierClass(item) {
+            return DROP_TIER_CLASSES[getDropTierIndex(item)];
+        }
+
+        function getDropRateText(item) {
+            const exact = item.probability ?? item.exactProbability ?? '';
+            return fuzzyDropRate ? DROP_TIER_LABELS[getDropTierIndex(item)] : exact;
+        }
+
+        function renderDropRateBadge(item) {
+            const tierClass = getDropTierClass(item);
+            const exact = escapeHtml(item.probability ?? '');
+            return `<span class="probability ${tierClass}" data-exact-probability="${exact}">${escapeHtml(getDropRateText(item))}</span>`;
+        }
+
+        function applyDropRateBadges(root = document) {
+            root.querySelectorAll('.detail-item[data-rate-numerator]').forEach(card => {
+                const item = {
+                    rate_numerator: card.dataset.rateNumerator,
+                    rate_denominator: card.dataset.rateDenominator,
+                    probability: card.querySelector('.probability')?.dataset.exactProbability || ''
+                };
+                const tierClass = getDropTierClass(item);
+                card.classList.remove(...DROP_TIER_CLASSES);
+                card.classList.add(tierClass);
+                const badge = card.querySelector('.probability');
+                if (badge) {
+                    badge.classList.remove(...DROP_TIER_CLASSES);
+                    badge.classList.add(tierClass);
+                    badge.textContent = getDropRateText(item);
+                }
+            });
+        }
         
         // 切换标签页
         function switchTab(tabName) {
@@ -593,8 +685,8 @@ def render_query_page(server_key=None, db_manager=None):
                     <h3>爆出物品：</h3>
                     <div class="detail-list-container">
                         ${data.items.map(item => `
-                            <div class="detail-item" data-item="${item.name}" onclick="jumpToItemDetail(this.dataset.item)">
-                                <h3>${item.name} <span class="probability">${item.probability}</span></h3>
+                            <div class="detail-item ${getDropTierClass(item)}" data-item="${item.name}" data-rate-numerator="${item.rate_numerator}" data-rate-denominator="${item.rate_denominator}" onclick="jumpToItemDetail(this.dataset.item)">
+                                <h3>${item.name} ${renderDropRateBadge(item)}</h3>
                             </div>
                         `).join('')}
                     </div>
@@ -672,8 +764,8 @@ def render_query_page(server_key=None, db_manager=None):
                     <h3>爆出怪物：</h3>
                     <div class="detail-list-container">
                         ${data.monsters.map(monster => `
-                            <div class="detail-item" data-monster="${monster.name}" onclick="jumpToMonsterDetail(this.dataset.monster)">
-                                <h3>${monster.name} <span class="probability">${monster.probability}</span></h3>
+                            <div class="detail-item ${getDropTierClass(monster)}" data-monster="${monster.name}" data-rate-numerator="${monster.rate_numerator}" data-rate-denominator="${monster.rate_denominator}" onclick="jumpToMonsterDetail(this.dataset.monster)">
+                                <h3>${monster.name} ${renderDropRateBadge(monster)}</h3>
                             </div>
                         `).join('')}
                     </div>
@@ -711,8 +803,8 @@ def render_query_page(server_key=None, db_manager=None):
                         <h3>爆出物品：</h3>
                         <div class="detail-list-container">
                             ${data.items.map(item => `
-                                <div class="detail-item" data-item="${item.name}" onclick="jumpToItemDetail(this.dataset.item)">
-                                    <h3>${item.name} <span class="probability">${item.probability}</span></h3>
+                                <div class="detail-item ${getDropTierClass(item)}" data-item="${item.name}" data-rate-numerator="${item.rate_numerator}" data-rate-denominator="${item.rate_denominator}" onclick="jumpToItemDetail(this.dataset.item)">
+                                    <h3>${item.name} ${renderDropRateBadge(item)}</h3>
                                 </div>
                             `).join('')}
                         </div>
@@ -758,8 +850,8 @@ def render_query_page(server_key=None, db_manager=None):
                         <h3>爆出怪物：</h3>
                         <div class="detail-list-container">
                             ${data.monsters.map(monster => `
-                                <div class="detail-item" data-monster="${monster.name}" onclick="jumpToMonsterDetail(this.dataset.monster)">
-                                    <h3>${monster.name} <span class="probability">${monster.probability}</span></h3>
+                                <div class="detail-item ${getDropTierClass(monster)}" data-monster="${monster.name}" data-rate-numerator="${monster.rate_numerator}" data-rate-denominator="${monster.rate_denominator}" onclick="jumpToMonsterDetail(this.dataset.monster)">
+                                    <h3>${monster.name} ${renderDropRateBadge(monster)}</h3>
                                 </div>
                             `).join('')}
                         </div>
@@ -810,7 +902,7 @@ def render_query_page(server_key=None, db_manager=None):
             }, 100);
         }
         
-        // 页面加载时加载地图数据
+                // 页面加载时加载地图数据
         window.onload = function() {
             loadMaps();
         };
@@ -818,7 +910,7 @@ def render_query_page(server_key=None, db_manager=None):
 </body>
 </html>'''
     
-    return html_content.replace('__API_BASE__', api_base).replace('__SERVER_NAME__', server_name)
+    return html_content.replace('__API_BASE__', api_base).replace('__SERVER_NAME__', server_name).replace('__FUZZY_DROP_RATE__', 'true' if is_fuzzy_drop_rate_enabled() else 'false')
 
 @app.route('/test')
 def test():

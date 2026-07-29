@@ -24,7 +24,7 @@ OFFICIAL_SITE_URL = "https://dyznb.com/"
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("典狱长群服管理中心 v1.2")
+        self.root.title("典狱长工作台 v1.2")
         self.root.geometry("1180x800")
         self.root.minsize(1080, 680)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)

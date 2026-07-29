@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sqlite3
 import socket
 import re
@@ -85,6 +85,29 @@ class GameDataManager:
         else:
             return "DefaultServer"
         
+    def load_existing_database(self):
+        """加载已存在的爆率数据库，不重新解析源文件。"""
+        if not os.path.exists(self.db_path):
+            return False, f"数据库文件不存在: {self.db_path}"
+
+        self.map_table = f"{self.server_name}_Map"
+        self.monitems_table = f"{self.server_name}_MonItems"
+        self.item_table = f"{self.server_name}_Item"
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            missing = []
+            for table_name in (self.map_table, self.monitems_table, self.item_table):
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+                if cursor.fetchone() is None:
+                    missing.append(table_name)
+            conn.close()
+            if missing:
+                return False, f"现有数据库缺少表: {', '.join(missing)}"
+            return True, f"已加载现有数据库: {self.db_path}"
+        except Exception as e:
+            return False, f"加载现有数据库失败: {e}"
     def check_port_availability(self):
         """检查端口是否被占用"""
         try:

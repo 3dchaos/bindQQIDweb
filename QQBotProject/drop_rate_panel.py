@@ -1,17 +1,17 @@
-﻿import os
+import os
 import sys
 import threading
 import time
 import socket
 import webbrowser
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
+from tkinter import ttk, filedialog, scrolledtext, messagebox
 import re
 
 from drop_rate_manager import GameDataManager
 import urllib.request
 import urllib.parse
-from drop_rate_web import app, get_registered_servers, set_global_db_managers
+from drop_rate_web import app, get_registered_servers, is_fuzzy_drop_rate_enabled, set_global_db_managers, set_global_fuzzy_drop_rate
 
 
 class DropRatePanel(ttk.Frame):
@@ -25,6 +25,7 @@ class DropRatePanel(ttk.Frame):
         self.db_managers = []
         self.server_thread = None
         self.server_running = False
+        self.fuzzy_drop_var = tk.BooleanVar(value=is_fuzzy_drop_rate_enabled())
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
@@ -85,6 +86,12 @@ class DropRatePanel(ttk.Frame):
                                        command=self.open_browser, state="disabled")
         self.btn_browser.pack(side="left", padx=2)
 
+        self.chk_fuzzy_drop = ttk.Checkbutton(
+            btn_frame, text="模糊爆率", variable=self.fuzzy_drop_var,
+            command=self._sync_fuzzy_drop_rate
+        )
+        self.chk_fuzzy_drop.pack(side="left", padx=(10, 2))
+
         server_list_frame = ttk.LabelFrame(config_frame, text="已添加服务端")
         server_list_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=6, pady=(2, 6))
         server_list_frame.columnconfigure(0, weight=1)
@@ -96,6 +103,7 @@ class DropRatePanel(ttk.Frame):
         self.server_tree.column("path", width=520, anchor="w")
         self.server_tree.grid(row=0, column=0, sticky="ew")
         self.server_tree.bind("<<TreeviewSelect>>", lambda _event: self._update_server_buttons())
+        set_global_fuzzy_drop_rate(self.fuzzy_drop_var.get())
         # ===== 典狱长监控网关广告横幅 =====
         ad_frame = tk.Frame(self, bg="#101820", cursor="hand2", height=42)
         ad_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
@@ -195,6 +203,23 @@ class DropRatePanel(ttk.Frame):
         except ValueError as e:
             return None, f"端口号无效: {e}"
 
+    def _find_server_index(self, root_dir):
+        target = os.path.normcase(os.path.abspath(root_dir))
+        for index, manager in enumerate(self.db_managers):
+            current = os.path.normcase(os.path.abspath(manager.server_root_dir))
+            if current == target:
+                return index
+        return None
+
+    def _upsert_db_manager(self, db_manager):
+        existing_index = self._find_server_index(db_manager.server_root_dir)
+        if existing_index is None:
+            self.db_managers.append(db_manager)
+        else:
+            self.db_managers[existing_index] = db_manager
+        self.db_manager = self.db_managers[0] if self.db_managers else None
+        set_global_db_managers(self.db_managers)
+
     def _server_root_exists(self, root_dir):
         target = os.path.normcase(os.path.abspath(root_dir))
         for manager in self.db_managers:
@@ -202,6 +227,13 @@ class DropRatePanel(ttk.Frame):
             if current == target:
                 return True
         return False
+
+    def _sync_fuzzy_drop_rate(self):
+        set_global_fuzzy_drop_rate(self.fuzzy_drop_var.get())
+        if self.fuzzy_drop_var.get():
+            self.log("\u6a21\u7cca\u7206\u7387\u5df2\u5f00\u542f")
+        else:
+            self.log("\u6a21\u7cca\u7206\u7387\u5df2\u5173\u95ed")
 
     def _refresh_server_tree(self):
         if not hasattr(self, "server_tree"):
@@ -242,7 +274,20 @@ class DropRatePanel(ttk.Frame):
             return
 
         self.server_root_dir = self.dir_var.get().strip()
-        if self._server_root_exists(self.server_root_dir):
+        existing_index = self._find_server_index(self.server_root_dir)
+        db_path = os.path.join(self.server_root_dir, "Mir200", "M2Data", "dyzSearch.DB")
+        db_exists = os.path.exists(db_path)
+        should_reinitialize = True
+
+        if db_exists:
+            should_reinitialize = messagebox.askyesno(
+                "重新初始化爆率数据库",
+                "发现已初始化的爆率数据库，是否重新初始化？\n\n选择“否”将直接加载现有数据库。"
+            )
+            if not should_reinitialize and existing_index is not None:
+                self.log("该服务端已添加，保留现有数据库")
+                return
+        elif existing_index is not None:
             self.log("该服务端已添加，请勿重复初始化")
             return
 
@@ -253,13 +298,13 @@ class DropRatePanel(ttk.Frame):
         self.port = port
 
         self.btn_init.config(state="disabled")
-        self.log("开始初始化数据...")
+        self.log("开始初始化数据..." if should_reinitialize else "正在加载现有数据库...")
 
         def _init_thread():
             try:
                 db_manager = GameDataManager(self.server_root_dir, self.port)
 
-                if not self.server_running:
+                if should_reinitialize and not self.server_running:
                     try:
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                             s.bind(('localhost', self.port))
@@ -270,12 +315,17 @@ class DropRatePanel(ttk.Frame):
                         self._enable_init_btn()
                         return
 
-                success, message = db_manager.initialize_data()
+                if should_reinitialize:
+                    success, message = db_manager.initialize_data()
+                else:
+                    success, message = db_manager.load_existing_database()
+
                 if success:
-                    self.db_managers.append(db_manager)
-                    self.db_manager = self.db_managers[0]
-                    set_global_db_managers(self.db_managers)
-                    self.log(f"数据初始化成功，已添加服务端: {db_manager.server_name}")
+                    self._upsert_db_manager(db_manager)
+                    action = "重新初始化" if should_reinitialize and db_exists else "数据初始化"
+                    if not should_reinitialize:
+                        action = "现有数据库加载"
+                    self.log(f"{action}成功，已添加服务端: {db_manager.server_name}")
                     for line in message.split('\n'):
                         if line.strip():
                             self.log(f"  {line.strip()}")
@@ -292,7 +342,6 @@ class DropRatePanel(ttk.Frame):
                 self._enable_init_btn()
 
         threading.Thread(target=_init_thread, daemon=True).start()
-
     def _enable_init_btn(self):
         """重新启用初始化按钮（线程安全）"""
         try:
