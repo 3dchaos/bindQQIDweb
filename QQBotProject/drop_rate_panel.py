@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import threading
 import time
@@ -10,7 +10,8 @@ import re
 
 from drop_rate_manager import GameDataManager
 import urllib.request
-from drop_rate_web import app, set_global_db_manager
+import urllib.parse
+from drop_rate_web import app, get_registered_servers, set_global_db_managers
 
 
 class DropRatePanel(ttk.Frame):
@@ -21,6 +22,7 @@ class DropRatePanel(ttk.Frame):
         self.server_root_dir = ""
         self.port = 8080
         self.db_manager = None
+        self.db_managers = []
         self.server_thread = None
         self.server_running = False
 
@@ -63,9 +65,13 @@ class DropRatePanel(ttk.Frame):
         btn_frame = ttk.Frame(config_frame)
         btn_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=6, pady=(4, 6))
 
-        self.btn_init = ttk.Button(btn_frame, text="初始化数据",
+        self.btn_init = ttk.Button(btn_frame, text="添加并初始化",
                                     command=self.initialize_data)
         self.btn_init.pack(side="left", padx=2)
+
+        self.btn_remove = ttk.Button(btn_frame, text="移除选中",
+                                      command=self.remove_selected_server, state="disabled")
+        self.btn_remove.pack(side="left", padx=2)
 
         self.btn_start = ttk.Button(btn_frame, text="启动服务器",
                                      command=self.start_server, state="disabled")
@@ -79,7 +85,18 @@ class DropRatePanel(ttk.Frame):
                                        command=self.open_browser, state="disabled")
         self.btn_browser.pack(side="left", padx=2)
 
-        # ===== 典狱长封挂插件广告横幅 =====
+        server_list_frame = ttk.LabelFrame(config_frame, text="已添加服务端")
+        server_list_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=6, pady=(2, 6))
+        server_list_frame.columnconfigure(0, weight=1)
+
+        self.server_tree = ttk.Treeview(server_list_frame, columns=("name", "path"), show="headings", height=4)
+        self.server_tree.heading("name", text="服务端")
+        self.server_tree.heading("path", text="根目录")
+        self.server_tree.column("name", width=160, anchor="w")
+        self.server_tree.column("path", width=520, anchor="w")
+        self.server_tree.grid(row=0, column=0, sticky="ew")
+        self.server_tree.bind("<<TreeviewSelect>>", lambda _event: self._update_server_buttons())
+        # ===== 典狱长监控网关广告横幅 =====
         ad_frame = tk.Frame(self, bg="#101820", cursor="hand2", height=42)
         ad_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
         ad_frame.grid_propagate(False)
@@ -91,14 +108,14 @@ class DropRatePanel(ttk.Frame):
         ad_icon.bind("<Button-1>", lambda e: self.open_dyz_website())
 
         ad_text = tk.Label(ad_frame,
-                           text="典狱长封挂插件 \u2014 让外挂无处遁形，还游戏一片净土",
+                           text="典狱长监控网关 \u2014 让流氓软件无处遁形，还游戏一片净土",
                            bg="#101820", fg="#e8e8e8",
                            font=("Microsoft YaHei UI", 10, "bold"),
                            cursor="hand2")
         ad_text.pack(side="left", padx=4)
         ad_text.bind("<Button-1>", lambda e: self.open_dyz_website())
 
-        ad_link = tk.Label(ad_frame, text="访问官网 dyzplugin.win \u2192",
+        ad_link = tk.Label(ad_frame, text="访问官网 dyznb.com \u2192",
                            bg="#101820", fg="#8fd3ff",
                            font=("Microsoft YaHei UI", 9, "underline"),
                            cursor="hand2")
@@ -169,47 +186,103 @@ class DropRatePanel(ttk.Frame):
         match = re.search(r'GameName=([^\r\n]+)', content)
         return match.group(1).strip() if match else "DefaultServer"
 
+    def _get_shared_port(self):
+        try:
+            port = int(self.port_var.get().strip())
+            if port < 1 or port > 65535:
+                raise ValueError("端口超出范围")
+            return port, None
+        except ValueError as e:
+            return None, f"端口号无效: {e}"
+
+    def _server_root_exists(self, root_dir):
+        target = os.path.normcase(os.path.abspath(root_dir))
+        for manager in self.db_managers:
+            current = os.path.normcase(os.path.abspath(manager.server_root_dir))
+            if current == target:
+                return True
+        return False
+
+    def _refresh_server_tree(self):
+        if not hasattr(self, "server_tree"):
+            return
+        self.server_tree.delete(*self.server_tree.get_children())
+        for index, manager in enumerate(self.db_managers):
+            self.server_tree.insert("", "end", iid=str(index), values=(manager.server_name, manager.server_root_dir))
+        self._update_server_buttons()
+
+    def _update_server_buttons(self):
+        has_servers = bool(self.db_managers)
+        has_selection = bool(getattr(self, "server_tree", None) and self.server_tree.selection())
+        self.btn_remove.config(state="normal" if has_selection and not self.server_running else "disabled")
+        self.btn_start.config(state="normal" if has_servers and not self.server_running else "disabled")
+        self.btn_stop.config(state="normal" if self.server_running else "disabled")
+        self.btn_browser.config(state="normal" if self.server_running else "disabled")
+
+    def remove_selected_server(self):
+        """移除列表中选中的服务端。"""
+        if self.server_running:
+            self.log("请先停止服务器，再移除服务端")
+            return
+        selected = self.server_tree.selection()
+        if not selected:
+            return
+        for item_id in sorted((int(item) for item in selected), reverse=True):
+            if 0 <= item_id < len(self.db_managers):
+                manager = self.db_managers.pop(item_id)
+                self.log(f"已移除服务端: {manager.server_name}")
+        self.db_manager = self.db_managers[0] if self.db_managers else None
+        set_global_db_managers(self.db_managers)
+        self._refresh_server_tree()
+
     def initialize_data(self):
-        """初始化爆率数据"""
+        """初始化当前选择的服务端，并加入可查询服务端列表。"""
         if not self.dir_var.get().strip():
             self.log("请先选择服务端根目录")
             return
 
         self.server_root_dir = self.dir_var.get().strip()
-        try:
-            self.port = int(self.port_var.get().strip())
-            if self.port < 1 or self.port > 65535:
-                raise ValueError("端口超出范围")
-        except ValueError as e:
-            self.log(f"端口号无效: {e}")
+        if self._server_root_exists(self.server_root_dir):
+            self.log("该服务端已添加，请勿重复初始化")
             return
+
+        port, error = self._get_shared_port()
+        if error:
+            self.log(error)
+            return
+        self.port = port
 
         self.btn_init.config(state="disabled")
         self.log("开始初始化数据...")
 
         def _init_thread():
             try:
-                self.db_manager = GameDataManager(self.server_root_dir, self.port)
+                db_manager = GameDataManager(self.server_root_dir, self.port)
 
-                # 检查端口是否可用
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.bind(('localhost', self.port))
-                        s.close()
-                    self.log(f"端口 {self.port} 可用")
-                except OSError:
-                    self.log(f"端口 {self.port} 仍被占用，请先停止已运行的服务器")
-                    self._enable_init_btn()
-                    return
+                if not self.server_running:
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.bind(('localhost', self.port))
+                            s.close()
+                        self.log(f"端口 {self.port} 可用")
+                    except OSError:
+                        self.log(f"端口 {self.port} 仍被占用，请先停止已运行的服务器")
+                        self._enable_init_btn()
+                        return
 
-                # 初始化数据
-                success, message = self.db_manager.initialize_data()
+                success, message = db_manager.initialize_data()
                 if success:
-                    self.log("数据初始化成功")
+                    self.db_managers.append(db_manager)
+                    self.db_manager = self.db_managers[0]
+                    set_global_db_managers(self.db_managers)
+                    self.log(f"数据初始化成功，已添加服务端: {db_manager.server_name}")
                     for line in message.split('\n'):
                         if line.strip():
                             self.log(f"  {line.strip()}")
-                    self.btn_start.config(state="normal")
+                    try:
+                        self.winfo_toplevel().after(0, self._refresh_server_tree)
+                    except Exception:
+                        pass
                 else:
                     self.log(f"数据初始化失败: {message}")
 
@@ -228,22 +301,19 @@ class DropRatePanel(ttk.Frame):
             pass
 
     def start_server(self):
-        """启动 Flask Web 服务器"""
-        if not self.db_manager:
-            self.log("请先初始化数据")
+        """启动 Flask Web 服务器，托管已添加的所有服务端。"""
+        if not self.db_managers:
+            self.log("请先添加并初始化至少一个服务端")
             return
         if self.server_running:
             self.log("服务器已在运行中")
             return
 
-        try:
-            new_port = int(self.port_var.get().strip())
-            if new_port < 1 or new_port > 65535:
-                raise ValueError("端口超出范围")
-            self.port = new_port
-        except ValueError as e:
-            self.log(f"端口号无效: {e}")
+        port, error = self._get_shared_port()
+        if error:
+            self.log(error)
             return
+        self.port = port
 
         # 检查端口是否可用
         try:
@@ -254,16 +324,17 @@ class DropRatePanel(ttk.Frame):
             self.log(f"端口 {self.port} 仍被占用，无法启动")
             return
 
+        set_global_db_managers(self.db_managers)
+        self.db_manager = self.db_managers[0]
         self.server_running = True
-        self.btn_start.config(state="disabled")
-        self.btn_stop.config(state="normal")
-        self.btn_browser.config(state="normal")
-
-        set_global_db_manager(self.db_manager)
+        self._update_server_buttons()
 
         local_ip = self.db_manager.get_local_ip()
         self.log(f"Web 服务器启动于端口 {self.port}")
-        self.log(f"浏览器访问: http://{local_ip}:{self.port}")
+        self.log(f"服务端选择页: http://{local_ip}:{self.port}")
+        for server in get_registered_servers():
+            route_key = urllib.parse.quote(server["key"], safe="")
+            self.log(f"  {server['name']}: http://{local_ip}:{self.port}/s/{route_key}/")
 
         def _run_flask():
             try:
@@ -272,11 +343,7 @@ class DropRatePanel(ttk.Frame):
                 self.log(f"服务器停止: {e}")
                 self.server_running = False
                 try:
-                    self.winfo_toplevel().after(0, lambda: (
-                        self.btn_start.config(state="normal"),
-                        self.btn_stop.config(state="disabled"),
-                        self.btn_browser.config(state="disabled")
-                    ))
+                    self.winfo_toplevel().after(0, self._update_server_buttons)
                 except Exception:
                     pass
 
@@ -288,9 +355,7 @@ class DropRatePanel(ttk.Frame):
         if not self.server_running:
             return
         self.server_running = False
-        self.btn_stop.config(state="disabled")
-        self.btn_start.config(state="normal")
-        self.btn_browser.config(state="disabled")
+        self._update_server_buttons()
 
         self.log("正在停止服务器...")
         # 通过 HTTP 请求优雅关闭 Flask 服务器
@@ -313,6 +378,7 @@ class DropRatePanel(ttk.Frame):
         else:
             self.log("等待端口释放超时，请稍后重试")
 
+        self._update_server_buttons()
         self.log("服务器已停止")
 
     def open_browser(self):
@@ -329,8 +395,8 @@ class DropRatePanel(ttk.Frame):
             self.log(f"打开浏览器失败: {e}")
 
     def open_dyz_website(self):
-        """打开典狱长封挂插件官网"""
+        """打开典狱长监控网关官网"""
         try:
-            webbrowser.open("https://dyzplugin.win/", new=2)
+            webbrowser.open("https://dyznb.com/", new=2)
         except Exception as e:
             self.log(f"打开官网失败: {e}")

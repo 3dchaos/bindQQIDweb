@@ -190,7 +190,7 @@ class MapEditorPanel(ttk.Frame):
         
         # 绑定点击事件
         def open_ad_link(event):
-                webbrowser.open("http://dyzplugin.win/")
+                webbrowser.open("http://dyznb.com/")
         
         ad_label.bind("<Button-1>", open_ad_link)
         ad_label.bind("<Enter>", lambda e: ad_label.configure(foreground="blue", cursor="hand2"))

@@ -1,26 +1,131 @@
+﻿import html
 import sqlite3
-from flask import Flask, render_template, jsonify, request
+from urllib.parse import quote
+from flask import Flask, jsonify, request
 
-# 全局变量存储数据库管理器
+# 全局变量存储数据库管理器。global_db_manager 保留给旧 /api 路由兼容使用。
 global_db_manager = None
+global_db_managers = {}
+global_server_entries = []
+
+
+def _manager_name(db_manager):
+    return (getattr(db_manager, "server_name", "") or "DefaultServer").strip() or "DefaultServer"
+
+
+def _unique_route_key(base_key, used_keys):
+    route_key = base_key
+    index = 2
+    while route_key in used_keys:
+        route_key = f"{base_key}-{index}"
+        index += 1
+    return route_key
+
 
 def set_global_db_manager(db_manager):
-    """设置全局数据库管理器"""
-    global global_db_manager
-    global_db_manager = db_manager
+    """设置单个数据库管理器，兼容旧的单服务端入口。"""
+    if db_manager is None:
+        set_global_db_managers([])
+    else:
+        set_global_db_managers([db_manager])
+
+
+def set_global_db_managers(db_managers):
+    """设置多个数据库管理器，供 /s/<服务端>/ 路由按服务端分发查询。"""
+    global global_db_manager, global_db_managers, global_server_entries
+    managers = list(db_managers or [])
+    global_db_manager = managers[0] if managers else None
+    global_db_managers = {}
+    global_server_entries = []
+
+    for db_manager in managers:
+        name = _manager_name(db_manager)
+        route_key = _unique_route_key(name, global_db_managers)
+        setattr(db_manager, "route_key", route_key)
+        global_db_managers[route_key] = db_manager
+        global_server_entries.append({"key": route_key, "name": name})
+
+
+def get_registered_servers():
+    """返回已注册服务端列表，供 GUI 打开指定路由。"""
+    return list(global_server_entries)
+
+
+def get_db_manager(server_key=None):
+    if server_key:
+        return global_db_managers.get(server_key)
+    return global_db_manager
+
 
 # 创建Flask应用
 app = Flask(__name__)
 
+
 @app.route('/')
 def index():
+    """首页：单服务端直接进入查询，多服务端显示服务端列表。"""
+    if len(global_server_entries) > 1:
+        return render_server_list()
+    return render_query_page()
+
+
+@app.route('/s/<path:server_key>/')
+def server_index(server_key):
+    """指定服务端查询页。"""
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
+        return jsonify({"error": "服务端不存在"}), 404
+    return render_query_page(server_key, db_manager)
+
+
+def render_server_list():
+    """渲染服务端选择页。"""
+    items = []
+    for server in global_server_entries:
+        name = html.escape(server["name"])
+        url = f"/s/{quote(server['key'], safe='')}/"
+        items.append(f'<a class="server-card" href="{url}">{name}</a>')
+    server_cards = "\n".join(items) or '<div class="empty">暂无可查询服务端</div>'
+    return f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>选择服务端</title>
+    <style>
+        body {{ font-family: "Microsoft YaHei", Arial, sans-serif; margin: 0; min-height: 100vh; background: #f4f7fb; color: #1f2937; }}
+        .wrap {{ max-width: 920px; margin: 0 auto; padding: 48px 20px; }}
+        h1 {{ margin: 0 0 8px; font-size: 30px; }}
+        p {{ margin: 0 0 24px; color: #6b7280; }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }}
+        .server-card {{ display: block; padding: 18px 20px; border: 1px solid #d7dde7; border-radius: 8px; background: #fff; color: #111827; text-decoration: none; font-weight: 700; box-shadow: 0 1px 3px rgba(15, 23, 42, .08); }}
+        .server-card:hover {{ border-color: #3b82f6; color: #1d4ed8; }}
+        .empty {{ padding: 18px 20px; border: 1px dashed #cbd5e1; border-radius: 8px; color: #64748b; }}
+    </style>
+</head>
+<body>
+    <main class="wrap">
+        <h1>选择服务端</h1>
+        <p>请选择要查询爆率数据的服务端。</p>
+        <div class="grid">{server_cards}</div>
+    </main>
+</body>
+</html>'''
+
+
+def render_query_page(server_key=None, db_manager=None):
     """主页面 - 直接返回HTML内容，不依赖模板文件"""
+    db_manager = db_manager or get_db_manager(server_key)
+    if not db_manager:
+        return jsonify({"error": "数据库未初始化"}), 500
+    api_base = f"/s/{quote(server_key, safe='')}/api" if server_key else "/api"
+    server_name = html.escape(_manager_name(db_manager))
     html_content = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>典狱长数据查询系统</title>
+    <title>__SERVER_NAME__</title>
     <style>
         * {
             margin: 0;
@@ -56,6 +161,16 @@ def index():
         .header p {
             font-size: 1.2em;
             opacity: 0.9;
+        }
+        
+        .back-link {
+            color: #fff;
+            text-decoration: none;
+            font-weight: 700;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
         }
         
         .ad-banner {
@@ -273,12 +388,12 @@ def index():
 <body>
     <div class="container">
         <div class="header">
-            <h1>典狱长数据查询系统</h1>
-            <p>查询怪物爆率、地图信息、物品掉落</p>
+            <h1>__SERVER_NAME__</h1>
+            <p><a href="/" class="back-link">返回服务器列表</a></p>
             <div class="ad-banner">
-                <a href="https://dyzplugin.win/" target="_blank" class="ad-link">
-                    <span class="ad-text">典狱长封挂插件</span>
-                    <span class="ad-desc">让外挂无处遁形，还游戏一片净土</span>
+                <a href="https://dyznb.com/" target="_blank" class="ad-link">
+                    <span class="ad-text">典狱长监控网关</span>
+                    <span class="ad-desc">让流氓软件无处遁形，还游戏一片净土</span>
                 </a>
             </div>
         </div>
@@ -333,6 +448,7 @@ def index():
         let maps = [];
         let monsters = [];
         let items = [];
+        const API_BASE = '__API_BASE__';
         
         // 切换标签页
         function switchTab(tabName) {
@@ -361,7 +477,7 @@ def index():
         // 加载地图列表
         async function loadMaps() {
             try {
-                const response = await fetch('/api/maps');
+                const response = await fetch(`${API_BASE}/maps`);
                 maps = await response.json();
                 displayMaps(maps);
             } catch (error) {
@@ -394,7 +510,7 @@ def index():
         // 显示地图详情
         async function showMapDetail(mapName) {
             try {
-                const response = await fetch(`/api/map/${encodeURIComponent(mapName)}`);
+                const response = await fetch(`${API_BASE}/map/${encodeURIComponent(mapName)}`);
                 const data = await response.json();
                 const monsters = data.monsters;
                 const mapAlias = data.map_alias;
@@ -432,7 +548,7 @@ def index():
         // 加载怪物列表
         async function loadMonsters() {
             try {
-                const response = await fetch('/api/monsters');
+                const response = await fetch(`${API_BASE}/monsters`);
                 monsters = await response.json();
                 displayMonsters(monsters);
             } catch (error) {
@@ -464,7 +580,7 @@ def index():
         async function showMonsterDetail(monsterName) {
             try {
                 console.log('显示怪物详情:', monsterName);
-                const response = await fetch(`/api/monster/${encodeURIComponent(monsterName)}`);
+                const response = await fetch(`${API_BASE}/monster/${encodeURIComponent(monsterName)}`);
                 const data = await response.json();
                 
                 document.getElementById('monsterList').style.display = 'none';
@@ -511,7 +627,7 @@ def index():
         // 加载物品列表
         async function loadItems() {
             try {
-                const response = await fetch('/api/items');
+                const response = await fetch(`${API_BASE}/items`);
                 items = await response.json();
                 displayItems(items);
             } catch (error) {
@@ -543,7 +659,7 @@ def index():
         async function showItemDetail(itemName) {
             try {
                 console.log('显示物品详情:', itemName);
-                const response = await fetch(`/api/item/${encodeURIComponent(itemName)}`);
+                const response = await fetch(`${API_BASE}/item/${encodeURIComponent(itemName)}`);
                 const data = await response.json();
                 
                 document.getElementById('itemList').style.display = 'none';
@@ -582,7 +698,7 @@ def index():
             // 等待标签页切换完成后再显示详情
             setTimeout(async () => {
                 try {
-                    const response = await fetch(`/api/monster/${encodeURIComponent(monsterName)}`);
+                    const response = await fetch(`${API_BASE}/monster/${encodeURIComponent(monsterName)}`);
                     const data = await response.json();
                     
                     document.getElementById('monsterList').style.display = 'none';
@@ -629,7 +745,7 @@ def index():
             // 等待标签页切换完成后再显示详情
             setTimeout(async () => {
                 try {
-                    const response = await fetch(`/api/item/${encodeURIComponent(itemName)}`);
+                    const response = await fetch(`${API_BASE}/item/${encodeURIComponent(itemName)}`);
                     const data = await response.json();
                     
                     document.getElementById('itemList').style.display = 'none';
@@ -663,7 +779,7 @@ def index():
             // 等待标签页切换完成后再显示详情
             setTimeout(async () => {
                 try {
-                    const response = await fetch(`/api/map/${encodeURIComponent(mapName)}`);
+                    const response = await fetch(`${API_BASE}/map/${encodeURIComponent(mapName)}`);
                     const data = await response.json();
                     const monsters = data.monsters;
                     const mapAlias = data.map_alias;
@@ -702,7 +818,7 @@ def index():
 </body>
 </html>'''
     
-    return html_content
+    return html_content.replace('__API_BASE__', api_base).replace('__SERVER_NAME__', server_name)
 
 @app.route('/test')
 def test():
@@ -710,18 +826,21 @@ def test():
         "status": "ok", 
         "message": "Flask服务器正常运行",
         "db_manager": "已设置" if global_db_manager else "未设置",
+        "servers": global_server_entries,
         "port": "正常"
     })
 
 @app.route('/api/maps')
-def get_maps():
+@app.route('/s/<path:server_key>/api/maps')
+def get_maps(server_key=None):
     """获取所有地图列表"""
-    if not global_db_manager:
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
         return jsonify({"error": "数据库未初始化"}), 500
     
-    conn = sqlite3.connect(global_db_manager.db_path)
+    conn = sqlite3.connect(db_manager.db_path)
     cursor = conn.cursor()
-    cursor.execute(f"SELECT DISTINCT map_name, map_alias FROM {global_db_manager.map_table} ORDER BY map_alias")
+    cursor.execute(f"SELECT DISTINCT map_name, map_alias FROM {db_manager.map_table} ORDER BY map_alias")
     maps = []
     for row in cursor.fetchall():
         map_name, map_alias = row
@@ -733,16 +852,18 @@ def get_maps():
     return jsonify(maps)
 
 @app.route('/api/map/<map_name>')
-def get_map_monsters(map_name):
+@app.route('/s/<path:server_key>/api/map/<map_name>')
+def get_map_monsters(map_name, server_key=None):
     """获取指定地图的怪物信息"""
-    if not global_db_manager:
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
         return jsonify({"error": "数据库未初始化"}), 500
     
-    conn = sqlite3.connect(global_db_manager.db_path)
+    conn = sqlite3.connect(db_manager.db_path)
     cursor = conn.cursor()
     cursor.execute(f'''
         SELECT monster_name, x, y, range_val, count, refresh_time, map_alias
-        FROM {global_db_manager.map_table} WHERE map_name = ?
+        FROM {db_manager.map_table} WHERE map_name = ?
         ORDER BY monster_name
     ''', (map_name,))
     monsters = []
@@ -764,31 +885,35 @@ def get_map_monsters(map_name):
     })
 
 @app.route('/api/monsters')
-def get_monsters():
+@app.route('/s/<path:server_key>/api/monsters')
+def get_monsters(server_key=None):
     """获取所有怪物列表"""
-    if not global_db_manager:
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
         return jsonify({"error": "数据库未初始化"}), 500
     
-    conn = sqlite3.connect(global_db_manager.db_path)
+    conn = sqlite3.connect(db_manager.db_path)
     cursor = conn.cursor()
-    cursor.execute(f"SELECT DISTINCT monster_name FROM {global_db_manager.monitems_table} ORDER BY monster_name")
+    cursor.execute(f"SELECT DISTINCT monster_name FROM {db_manager.monitems_table} ORDER BY monster_name")
     monsters = [row[0] for row in cursor.fetchall()]
     conn.close()
     return jsonify(monsters)
 
 @app.route('/api/monster/<monster_name>')
-def get_monster_info(monster_name):
+@app.route('/s/<path:server_key>/api/monster/<monster_name>')
+def get_monster_info(monster_name, server_key=None):
     """获取指定怪物的信息"""
-    if not global_db_manager:
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
         return jsonify({"error": "数据库未初始化"}), 500
     
-    conn = sqlite3.connect(global_db_manager.db_path)
+    conn = sqlite3.connect(db_manager.db_path)
     cursor = conn.cursor()
     
     # 获取怪物爆出物品
     cursor.execute(f'''
         SELECT item_name, probability, rate_numerator, rate_denominator
-        FROM {global_db_manager.monitems_table} WHERE monster_name = ?
+        FROM {db_manager.monitems_table} WHERE monster_name = ?
         ORDER BY rate_numerator DESC, rate_denominator ASC
     ''', (monster_name,))
     items = []
@@ -803,7 +928,7 @@ def get_monster_info(monster_name):
     # 获取怪物出现的地图
     cursor.execute(f'''
         SELECT DISTINCT map_name, map_alias, x, y, range_val, count, refresh_time
-        FROM {global_db_manager.map_table} WHERE monster_name = ?
+        FROM {db_manager.map_table} WHERE monster_name = ?
         ORDER BY map_alias
     ''', (monster_name,))
     maps = []
@@ -825,31 +950,35 @@ def get_monster_info(monster_name):
     })
 
 @app.route('/api/items')
-def get_items():
+@app.route('/s/<path:server_key>/api/items')
+def get_items(server_key=None):
     """获取所有物品列表"""
-    if not global_db_manager:
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
         return jsonify({"error": "数据库未初始化"}), 500
     
-    conn = sqlite3.connect(global_db_manager.db_path)
+    conn = sqlite3.connect(db_manager.db_path)
     cursor = conn.cursor()
-    cursor.execute(f"SELECT item_name FROM {global_db_manager.item_table} ORDER BY item_name")
+    cursor.execute(f"SELECT item_name FROM {db_manager.item_table} ORDER BY item_name")
     items = [row[0] for row in cursor.fetchall()]
     conn.close()
     return jsonify(items)
 
 @app.route('/api/item/<item_name>')
-def get_item_info(item_name):
+@app.route('/s/<path:server_key>/api/item/<item_name>')
+def get_item_info(item_name, server_key=None):
     """获取指定物品的信息"""
-    if not global_db_manager:
+    db_manager = get_db_manager(server_key)
+    if not db_manager:
         return jsonify({"error": "数据库未初始化"}), 500
     
-    conn = sqlite3.connect(global_db_manager.db_path)
+    conn = sqlite3.connect(db_manager.db_path)
     cursor = conn.cursor()
     
     # 获取爆出该物品的怪物
     cursor.execute(f'''
         SELECT monster_name, probability, rate_numerator, rate_denominator
-        FROM {global_db_manager.monitems_table} WHERE item_name = ?
+        FROM {db_manager.monitems_table} WHERE item_name = ?
         ORDER BY rate_numerator DESC, rate_denominator ASC
     ''', (item_name,))
     monsters = []
